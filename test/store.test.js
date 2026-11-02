@@ -60,22 +60,16 @@ const tmp = store.assignCode('2100000000101', 'מוצרלה');
 store.renameProduct(tmp.id, 'קוטג׳');
 assert.strictEqual(store.codesOf(store.findProductByName('קוטג׳').id).length, 2);
 
-// "עגבניות" on the list becomes the receipt's "עגבניות שרי"; products stay separate
+// What the user typed wins: no renaming, even when a longer product exists
 store.assignCode('yohananof:728', 'עגבניות שרי');
 assert.strictEqual(store.matchProduct('עגבניות'), null);
-assert.strictEqual(store.addToList('עגבניות').name, 'עגבניות שרי');
-// Whole words only: "חלב" must not turn into "רבע לשבע חלבה"
-store.assignCode('7290000000147', 'רבע לשבע חלבה');
+assert.strictEqual(store.addToList('עגבניות').name, 'עגבניות');
+store.assignCode('7290000000147', 'מלח לימון');
+assert.strictEqual(store.addToList('מלח').name, 'מלח');
+assert.strictEqual(store.matchProduct('מלח'), null, 'no price borrowed from מלח לימון');
+// Whole words only in suggestions: "חלב" must not match "רבע לשבע חלבה"
+store.assignCode('7290000000154', 'רבע לשבע חלבה');
 assert.deepStrictEqual(store.similarProducts('חלב').map((p) => p.name), []);
-// Once regular tomatoes exist as their own product, "עגבניות" stays "עגבניות"
-store.assignCode('yohananof:9999', 'עגבניות');
-assert.notStrictEqual(store.findProductByName('עגבניות').id, store.findProductByName('עגבניות שרי').id);
-assert.strictEqual(store.resolveName('עגבניות'), 'עגבניות');
-// Items typed before a matching receipt get renamed later
-store.state.list.push({ id: 'x1', name: 'גבינת מוצרלה', checked: false });
-store.assignCode('2100000000101', 'גבינת מוצרלה בסגנון');
-store.resolveListNames();
-assert.strictEqual(store.state.list.find((i) => i.id === 'x1').name, 'גבינת מוצרלה בסגנון');
 
 // Estimate: cottage was bought 3× in one trip → typical spend 20.1
 const cottage = store.stats(store.findProductByName('קוטג׳').id, '2026-10-26T10:00:00');

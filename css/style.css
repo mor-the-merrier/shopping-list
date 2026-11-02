@@ -604,3 +604,21 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
 
 /* "~" before a price: this is what we expect to pay, not a fixed price. */
 .approx { font-weight: 400; opacity: 0.6; margin-inline-end: 1px; }
+
+/* ---------- reading a picture receipt ---------- */
+.panel.ocr { margin-top: 0; }
+
+.ocr-track { height: 10px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; margin: 4px 0 6px; }
+
+.ocr-bar { height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.3s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ocr-bar { transition: none; }
+}
+
+/* ---------- the cart ---------- */
+.tone-cart { background: var(--accent-soft); color: var(--accent-strong); }
+
+.aisle.cart { border: 1.5px dashed var(--check); }
+
+.all-done { text-align: center; color: var(--muted); margin: 8px 0 14px; }

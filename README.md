@@ -19,14 +19,19 @@ No AI and no running costs. All the calculations happen in the browser, and shar
 4. On the **רשימה** (List) screen, add items and see prices, the estimated total and suggestions.
 5. On the **משפחה** (Family) screen, create a shared list and send the invite link.
 
-Receipt parsing is tested with Yohananof receipts in the Weezmo format. Other chains that use the same format should work too.
+Two kinds of receipts are supported:
+
+- **Yohananof (Weezmo format):** the PDF contains text, which is read directly. Other chains using the same format should work too.
+- **Shufersal:** the PDF is a picture of the receipt, so it's read with OCR ([Tesseract.js](https://github.com/naptha/tesseract.js), free and open source) inside the browser. Nothing is sent to any server. The first time, the browser downloads the OCR engine and the Hebrew language file (a few MB). Screenshots of a receipt work the same way.
+
+For picture receipts the code, description and amount columns are read separately, with digits-only settings for the number columns, which makes barcodes and prices much more reliable.
 
 ### How prices and suggestions are calculated
 
 - **Usual price:** the median shelf price over the last year, so a one-off sale doesn't skew it.
 - **Estimated total:** for each item, the median amount spent on it per shopping trip (three cottage cheeses count as three).
 - **Suggestions:** the median number of days between purchases of a product. An item is suggested when it's due within two days, and dropped if it's more than three intervals overdue.
-- **Matching list items to products:** an exact name match first. Otherwise, the most frequently bought product whose name contains what you typed as whole words ("עגבניות" → "עגבניות שרי"). Similar products are never merged.
+- **Matching list items to products:** what you type is kept exactly. An item shows a price when its name matches a product from your receipts; the suggestions under the box while typing help pick the exact name.
 
 ## Firebase setup (one time)
 
@@ -88,6 +93,7 @@ python3 -m http.server 8000
 node test/parser.test.js   # receipt parsing
 node test/store.test.js    # prices, frequency, suggestions, totals
 node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
+node test/shufersal.test.js  # Shufersal layout from made-up OCR words
 ```
 
 `test/sample-yohananof.txt` is a made-up receipt in the Weezmo format. Its products, barcodes and prices are fictional.
@@ -100,6 +106,8 @@ node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 | `css/style.css` | Styles, including dark mode |
 | `js/parser.js` | Turns receipt text into product, price and quantity lines |
 | `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
+| `js/ocr.js` | Reads picture receipts (Shufersal, screenshots) with Tesseract.js |
+| `js/shufersal.js` | Turns Shufersal OCR results into receipt lines |
 | `js/categories.js` | Store sections and the keyword list used to guess them |
 | `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
 | `js/cloud.js` | Family sharing: Firebase sync, invites and joining |

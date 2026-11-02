@@ -189,18 +189,19 @@
       this.save();
     }
 
-    /** The list grouped by section, in the order you walk through a store. */
+    /** What's left to buy, grouped by section in the order you walk through a store. */
     listBySection() {
       const { ORDER, BY_ID } = Categories();
       const groups = new Map();
       for (const item of this.state.list) {
+        if (item.checked) continue; // checked items are shown in the cart
         const id = this.categoryOfItem(item);
         if (!groups.has(id)) groups.set(id, []);
         groups.get(id).push(item);
       }
       return Array.from(groups.entries())
         .sort((a, b) => ORDER[a[0]] - ORDER[b[0]])
-        .map(([id, items]) => ({ category: BY_ID[id], items: items.sort((a, b) => Number(a.checked) - Number(b.checked)) }));
+        .map(([id, items]) => ({ category: BY_ID[id], items }));
     }
 
     codesOf(productId) {
@@ -324,34 +325,8 @@
     }
 
     // ---------- shopping list ----------
-    /**
-     * The name to put on the list: the exact product if it exists, otherwise
-     * the receipt product it most likely means ("עגבניות" → "עגבניות שרי").
-     */
-    resolveName(name) {
-      const clean = String(name || '').trim();
-      if (!clean || this.findProductByName(clean)) return clean;
-      const similar = this.similarProducts(clean, 1);
-      return similar.length ? similar[0].name : clean;
-    }
-
-    /** Apply resolveName to items already on the list (after new receipts). */
-    resolveListNames() {
-      let changed = false;
-      for (const item of this.state.list) {
-        if (item.checked) continue;
-        const resolved = this.resolveName(item.name);
-        if (resolved !== item.name) {
-          item.name = resolved;
-          changed = true;
-        }
-      }
-      if (changed) this.save();
-      return changed;
-    }
-
     addToList(name) {
-      const clean = this.resolveName(name);
+      const clean = String(name || '').trim(); // exactly what was typed
       if (!clean) return null;
       const dup = this.state.list.find((i) => !i.checked && norm(i.name) === norm(clean));
       if (dup) return dup;

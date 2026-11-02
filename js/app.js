@@ -209,7 +209,7 @@
       .map(
         ({ category, items }) => `
         <section class="aisle" aria-label="${esc(category.name)}">
-          <h2 class="aisle-head tone-${category.tone}">${sectionIcon(category.id)}<span>${esc(category.name)}</span><span class="aisle-count">${items.filter((i) => !i.checked).length || ''}</span></h2>
+          <h2 class="aisle-head tone-${category.tone}">${sectionIcon(category.id)}<span>${esc(category.name)}</span><span class="aisle-count">${items.length}</span></h2>
           <ul class="list">${items.map((it, i) => itemHtml(it, i === items.length - 1)).join('')}</ul>
         </section>`
       )
@@ -300,7 +300,16 @@
       </form>
       ${suggestHtml}
       ${sectionsHtml}
-      ${done.length ? `<div class="list-actions"><button class="link" data-act="clear">ניקוי מה שבעגלה בלי לשמור קנייה</button></div>` : ''}
+      ${!open.length && done.length ? `<p class="all-done">הכול בעגלה. אפשר לסיים את הקנייה.</p>` : ''}
+      ${
+        done.length
+          ? `<section class="aisle cart" aria-label="בעגלה">
+               <h2 class="aisle-head tone-cart"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.6L21 7H6"/></svg><span>בעגלה</span><span class="aisle-count">${done.length} · <bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(est.cart)}</bdi></span></h2>
+               <ul class="list">${done.map((it, i) => itemHtml(it, i === done.length - 1)).join('')}</ul>
+             </section>
+             <div class="list-actions"><button class="link" data-act="clear">ניקוי העגלה בלי לשמור קנייה</button></div>`
+          : ''
+      }
       ${emptyHtml}
       ${barHtml}
     `;
@@ -385,11 +394,20 @@
 
     view.innerHTML = `
       ${ui.unknown && ui.unknown.length ? '' : `
-      <label class="upload">
-        <input type="file" id="pdfInput" accept="application/pdf,.pdf">
-        <strong>העלאת קבלה</strong>
-        <span>פותחים את הקישור מה־SMS, שומרים את ה־PDF ומעלים אותו כאן.</span>
-      </label>
+      ${
+        ui.ocr
+          ? `<section class="panel ocr" aria-live="polite">
+               <h3>קורא את הקבלה</h3>
+               <p id="ocrLabel">${esc(ui.ocr.label)}</p>
+               <div class="ocr-track"><div class="ocr-bar" id="ocrBar" style="width: ${Math.round(ui.ocr.progress * 100)}%"></div></div>
+               <p class="hint">קבלה שהיא תמונה (כמו של שופרסל) נקראת בזיהוי טקסט בטלפון עצמו. זה לוקח כחצי דקה, ובפעם הראשונה קצת יותר.</p>
+             </section>`
+          : `<label class="upload">
+               <input type="file" id="pdfInput" accept="application/pdf,.pdf,image/*">
+               <strong>העלאת קבלה</strong>
+               <span>PDF מהקישור ב־SMS, או צילום מסך של הקבלה. עובד עם יוחננוף ושופרסל.</span>
+             </label>`
+      }
       <details class="paste">
         <summary>או הדבקת הטקסט של הקבלה</summary>
         <textarea id="pasteInput" placeholder="מדביקים כאן את כל הטקסט שבדף הקבלה"></textarea>
@@ -414,9 +432,36 @@
       const score = parsed.items.length * 10 - parsed.warnings.length;
       if (!best || score > best.score) best = { parsed, text, score };
     }
-    const { parsed, text } = best;
+    showParsed(best.parsed, best.text);
+  }
+
+  function showParsed(parsed, text) {
     ui.pending = { parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text };
     render();
+  }
+
+  /** Picture receipts (Shufersal's PDF, screenshots): OCR in the browser, with progress. */
+  async function readPicture(file) {
+    ui.ocr = { progress: 0, label: 'מכין את התמונה' };
+    ui.pending = null;
+    render();
+    const result = await window.ReceiptOcr.readPictureReceipt(file, (progress, label) => {
+      ui.ocr = { progress, label };
+      const bar = document.getElementById('ocrBar');
+      const text = document.getElementById('ocrLabel');
+      if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
+      if (text) text.textContent = label;
+    });
+    ui.ocr = null;
+    const rows = window.Shufersal.buildRows(result);
+    let parsed = window.Shufersal.parseRows(rows, result.text);
+    // Not a Shufersal layout? Try the general text parser on what was read.
+    if (!parsed.items.length) {
+      const general = window.ReceiptParser.parse(result.text);
+      if (general.items.length) parsed = general;
+    }
+    const debug = rows.map((r) => [r.code, r.desc, r.amount].filter(Boolean).join(' | ')).join('\n');
+    showParsed(parsed, debug || result.text);
   }
 
   // ---------- products screen ----------
@@ -601,7 +646,6 @@
           const el = document.getElementById('addInput');
           if (el && el.value.trim() === typed) el.value = '';
         }, 80);
-        if (item.name !== typed) toast(`נוסף כ"${item.name}", כמו בקבלה`);
       }
       return;
     }
@@ -668,7 +712,6 @@
         const name = input.value.trim() || input.closest('.map-row').querySelector('label').textContent.split(',')[0];
         store.assignCode(input.dataset.key, name);
       });
-      store.resolveListNames(); // new products may now match items on the list
       store.save();
       const n = ui.unknown.length;
       ui.unknown = null;
@@ -808,12 +851,22 @@
     }
     if (e.target.id === 'pdfInput' && e.target.files[0]) {
       const file = e.target.files[0];
-      toast('קורא את הקבלה…');
+      e.target.value = ''; // so choosing the same file again still triggers
+      const isImage = /^image\//.test(file.type);
       try {
-        const readings = await window.PdfText.pdfToTexts(file);
-        handleParsed(readings.map((r) => r.text));
+        let readings = [];
+        if (!isImage) {
+          toast('קורא את הקבלה…');
+          readings = await window.PdfText.pdfToTexts(file);
+        }
+        // A PDF with no text inside (like Shufersal's) or a screenshot: read the picture.
+        const hasText = readings.some((r) => r.text.replace(/\s/g, '').length > 40);
+        if (isImage || !hasText) await readPicture(file);
+        else handleParsed(readings.map((r) => r.text));
       } catch (err) {
         console.error(err);
+        ui.ocr = null;
+        render();
         toast(err.message || 'לא הצלחתי לפתוח את הקובץ');
       }
     } else if (e.target.id === 'importInput' && e.target.files[0]) {
@@ -849,7 +902,6 @@
       .joinHousehold(code)
       .then(() => {
         clearJoinParam();
-        store.resolveListNames();
         toast('הצטרפת לרשימה המשותפת');
         setTab('list');
       })
@@ -870,7 +922,6 @@
     /* not supported */
   }
 
-  store.resolveListNames();
   render();
   if (cloud) cloud.start();
 })();
