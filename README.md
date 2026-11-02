@@ -3,6 +3,7 @@
 A family shopping list (Hebrew interface) that learns from your digital supermarket receipts:
 
 - **Usual price next to every item.** Upload a receipt and the app remembers what you paid. Add "milk" to the list and the price you usually pay shows up next to it, styled like a shelf tag.
+- **Grouped by store section** (produce, dairy, bakery, cleaning…), in the order you walk through the store. Sections are guessed from product names with a keyword list (`js/categories.js`) and can be changed per product.
 - **Estimated total** for the list, and a place to record what you actually paid when you finish shopping.
 - **Shelf price check.** Tap an item, type the price on the shelf, and see whether it's cheaper, normal or more expensive than usual.
 - **"Probably running out" suggestions,** based on how often you buy each product.
@@ -99,6 +100,7 @@ node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 | `css/style.css` | Styles, including dark mode |
 | `js/parser.js` | Turns receipt text into product, price and quantity lines |
 | `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
+| `js/categories.js` | Store sections and the keyword list used to guess them |
 | `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
 | `js/cloud.js` | Family sharing: Firebase sync, invites and joining |
 | `js/app.js` | Screens and interaction |

@@ -15,6 +15,8 @@
   'use strict';
 
   const STORAGE_KEY = 'kniyot.v1';
+  const Categories = () =>
+    root.KniyotCategories || (typeof require === 'function' ? require('./categories.js') : null);
   const DAY = 24 * 60 * 60 * 1000;
   const PRICE_WINDOW_DAYS = 365;
   const SUGGEST_AHEAD_DAYS = 2;
@@ -123,8 +125,8 @@
       const word = new RegExp(`(^|\\s)${escaped}(\\s|$)`);
       return Object.values(this.state.products)
         .filter((p) => norm(p.name) !== n && word.test(norm(p.name)))
-        .map((p) => ({ p, times: (this.stats(p.id) || { timesBought: 0 }).timesBought }))
-        .sort((a, b) => b.times - a.times)
+        .map((p) => ({ p, starts: norm(p.name).startsWith(n + ' '), times: (this.stats(p.id) || { timesBought: 0 }).timesBought }))
+        .sort((a, b) => Number(b.starts) - Number(a.starts) || b.times - a.times)
         .slice(0, limit)
         .map((x) => x.p);
     }
@@ -164,6 +166,41 @@
         p.name = String(newName).trim();
       }
       this.save();
+    }
+
+    // ---------- store sections ----------
+    /** Section id for a product: the user's choice, else a guess from its names. */
+    categoryOfProduct(product) {
+      if (!product) return 'other';
+      if (product.category) return product.category;
+      return Categories().guessCategory(product.name, ...this.rawNamesOf(product.id));
+    }
+
+    /** Section id for a list item (works for items with no receipt history too). */
+    categoryOfItem(item) {
+      const product = this.matchProduct(item.name);
+      return product ? this.categoryOfProduct(product) : Categories().guessCategory(item.name);
+    }
+
+    setCategory(productId, categoryId) {
+      const p = this.state.products[productId];
+      if (!p || !Categories().BY_ID[categoryId]) return;
+      p.category = categoryId;
+      this.save();
+    }
+
+    /** The list grouped by section, in the order you walk through a store. */
+    listBySection() {
+      const { ORDER, BY_ID } = Categories();
+      const groups = new Map();
+      for (const item of this.state.list) {
+        const id = this.categoryOfItem(item);
+        if (!groups.has(id)) groups.set(id, []);
+        groups.get(id).push(item);
+      }
+      return Array.from(groups.entries())
+        .sort((a, b) => ORDER[a[0]] - ORDER[b[0]])
+        .map(([id, items]) => ({ category: BY_ID[id], items: items.sort((a, b) => Number(a.checked) - Number(b.checked)) }));
     }
 
     codesOf(productId) {

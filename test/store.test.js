@@ -95,6 +95,20 @@ assert.strictEqual(trip.items, 1);
 assert.strictEqual(store.state.list.length, 1, 'cart cleared, open item kept');
 assert.strictEqual(store.lastTrip().date, '2026-10-26');
 
+// Store sections: guessed, overridable, grouped in store-walk order
+store.state.list = [];
+for (const n of ['נייר אפייה', 'חלב', 'עגבניות שרי', 'משהו לא מוכר']) store.addToList(n);
+assert.deepStrictEqual(
+  store.listBySection().map((g) => g.category.id),
+  ['produce', 'dairy', 'home', 'other'],
+  'sections in store order'
+);
+const tomatoes = store.findProductByName('עגבניות שרי');
+store.setCategory(tomatoes.id, 'frozen');
+assert.strictEqual(store.categoryOfItem(store.state.list.find((i) => i.name === 'עגבניות שרי')), 'frozen', 'manual choice wins');
+store.setCategory(tomatoes.id, 'not-a-section');
+assert.strictEqual(store.categoryOfProduct(tomatoes), 'frozen', 'invalid section ignored');
+
 // Delete receipt
 store.deleteReceipt(first.receipt.id);
 assert.strictEqual(store.stats(eggs.id, '2026-10-26T10:00:00').timesBought, 1);

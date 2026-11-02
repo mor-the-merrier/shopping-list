@@ -114,12 +114,11 @@
     return s || String(raw).trim();
   }
 
-  function priceTag(stats, label = 'בד״כ') {
+  function priceTag(stats) {
     if (!stats) return '';
-    const top = stats.weighted ? `${label} לק״ג` : label;
-    return `<span class="tag" aria-label="מחיר רגיל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}"><small>${top}</small><b>₪${money(
-      stats.usualPrice
-    )}</b></span>`;
+    return `<span class="price" aria-label="בדרך כלל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}">₪${money(stats.usualPrice)}${
+      stats.weighted ? '<small> לק״ג</small>' : ''
+    }</span>`;
   }
 
   function refreshDatalist() {
@@ -137,13 +136,32 @@
   }
 
   // ---------- list screen ----------
+  const SECTION_ICONS = {
+    produce: '<path d="M11 20A7 7 0 0 1 4 13c0-5 4-9 16-9 0 12-4 16-9 16Z"/><path d="M4 20c4-4 7-6 11-8"/>',
+    bakery: '<path d="M5 11a4 4 0 0 1 3-6.7A4 4 0 0 1 12 3a4 4 0 0 1 4 1.3A4 4 0 0 1 19 11v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M9 11v5M15 11v5"/>',
+    dairy: '<path d="M8 2h8v4l2 3v13H6V9l2-3z"/><path d="M6 13h12"/>',
+    meat: '<path d="M15.5 4.5a5 5 0 0 1 0 7.1l-4 4-4.5.4.4-4.5 4-4a5 5 0 0 1 4.1-3z"/><path d="m7.4 16.6-3.2 3.2M5 21l-1.8-1.8"/>',
+    pantry: '<path d="M7 3h10v3H7z"/><path d="M6 6h12v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1z"/><path d="M6 11h12"/>',
+    frozen: '<path d="M12 2v20M4 7l16 10M20 7 4 17"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2"/>',
+    drinks: '<path d="M10 2h4v4l2 3v12a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9l2-3z"/><path d="M8 13h8"/>',
+    snacks: '<circle cx="12" cy="12" r="5"/><path d="m7 12-4-3v6zM17 12l4-3v6z"/>',
+    home: '<path d="M3 10 12 3l9 7v11H3z"/><path d="M9 21v-6h6v6"/>',
+    care: '<path d="M12 21s-7-4.4-9.3-9A5.3 5.3 0 0 1 12 6.3 5.3 5.3 0 0 1 21.3 12C19 16.6 12 21 12 21z"/>',
+    other: '<circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/>',
+  };
+
+  function sectionIcon(id) {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SECTION_ICONS[id] || SECTION_ICONS.other}</svg>`;
+  }
+
   function renderList() {
     const list = store.state.list;
     const open = list.filter((i) => !i.checked);
     const done = list.filter((i) => i.checked);
     const suggestions = store.suggestions();
+    const groups = store.listBySection();
 
-    const itemHtml = (item) => {
+    const itemHtml = (item, isLast) => {
       const product = store.matchProduct(item.name);
       const stats = product ? store.stats(product.id) : null;
       const isOpen = ui.expanded === item.id;
@@ -171,84 +189,93 @@
           detail = `<div class="detail">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</div>`;
         }
       }
+      const price = stats
+        ? `<span class="price" aria-label="בדרך כלל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}">₪${money(stats.usualPrice)}${
+            stats.weighted ? '<small> לק״ג</small>' : ''
+          }</span>`
+        : `<span class="price none">אין מחיר</span>`;
       return `
-        <li class="item${item.checked ? ' done' : ''}" data-id="${item.id}">
+        <li class="item${item.checked ? ' done' : ''}${isLast ? ' last' : ''}" data-id="${item.id}">
           <div class="row">
             <button class="check" data-act="toggle" aria-label="${item.checked ? 'ביטול סימון' : 'סימון'} ${esc(item.name)}" aria-pressed="${item.checked}">${ICON_CHECK}</button>
             <button class="name" data-act="expand" aria-expanded="${isOpen}">${esc(item.name)}</button>
-            ${priceTag(stats)}
+            ${price}
           </div>
           ${detail}
         </li>`;
     };
 
-    const SHOW = 6;
+    const sectionsHtml = groups
+      .map(
+        ({ category, items }) => `
+        <section class="aisle" aria-label="${esc(category.name)}">
+          <h2 class="aisle-head tone-${category.tone}">${sectionIcon(category.id)}<span>${esc(category.name)}</span><span class="aisle-count">${items.filter((i) => !i.checked).length || ''}</span></h2>
+          <ul class="list">${items.map((it, i) => itemHtml(it, i === items.length - 1)).join('')}</ul>
+        </section>`
+      )
+      .join('');
+
+    const SHOW = 3;
     const shown = ui.allSuggestions ? suggestions : suggestions.slice(0, SHOW);
     const hidden = suggestions.length - shown.length;
     const suggestHtml = suggestions.length
-      ? `<h2>כנראה צריך לקנות</h2>
-         <div class="suggest">
+      ? `<div class="quick" role="group" aria-label="כנראה נגמר">
+           <span class="quick-label">כנראה נגמר:</span>
            ${shown
              .map(
                ({ product, stats }) => `
-             <span class="chip">
-               <button class="chip-add" data-suggest="${product.id}" aria-label="הוספת ${esc(product.name)} לרשימה">
-                 ${esc(product.name)}<small>${dueHe(stats.dueIn)}</small>
-               </button>
+             <span class="chip" title="${esc(dueHe(stats.dueIn))}">
+               <button class="chip-add" data-suggest="${product.id}" aria-label="הוספת ${esc(product.name)} לרשימה, ${esc(dueHe(stats.dueIn))}">+ ${esc(product.name)}</button>
                <button class="chip-x" data-dismiss="${product.id}" aria-label="להסתיר את ${esc(product.name)} לבינתיים">×</button>
              </span>`
              )
              .join('')}
-         </div>
-         ${hidden > 0 ? `<button class="link" data-act="more-suggestions">עוד ${hidden} הצעות</button>` : ''}
-         ${ui.allSuggestions && suggestions.length > SHOW ? `<button class="link" data-act="less-suggestions">פחות הצעות</button>` : ''}`
+           ${hidden > 0 ? `<button class="link" data-act="more-suggestions">עוד ${hidden}</button>` : ''}
+           ${ui.allSuggestions && suggestions.length > SHOW ? `<button class="link" data-act="less-suggestions">פחות</button>` : ''}
+         </div>`
       : '';
 
-    const empty =
-      !list.length
-        ? `<div class="empty"><strong>הרשימה ריקה</strong>אפשר להוסיף מוצר בשורה למעלה. אחרי שתעלי כמה קבלות, יופיעו כאן גם הצעות למה שכנראה נגמר.</div>`
-        : '';
-
-    // ---- total summary ----
-    const est = store.estimate();
     const last = store.lastTrip();
-    let summaryHtml = '';
-    if (list.length) {
-      const note = est.unpriced
-        ? `<span class="sum-note">לא כולל ${est.unpriced === 1 ? 'מוצר אחד' : `${est.unpriced} מוצרים`} בלי מחיר</span>`
-        : `<span class="sum-note">לפי מה שבדרך כלל קונים מכל מוצר</span>`;
-      summaryHtml = `
-        <section class="summary" aria-label="סיכום סכום">
-          <div class="sum-main">
-            <span class="sum-label">משוער לרשימה</span>
-            <span class="sum-value">₪${money(est.all)}</span>
-            ${note}
-          </div>
+    let emptyHtml = '';
+    if (!list.length) {
+      const diff = last && last.actual != null ? round2(last.actual - last.estimate) : null;
+      emptyHtml = `
+        <div class="empty">
+          <strong>הרשימה ריקה</strong>
+          אפשר להוסיף מוצר בשורה למעלה. אחרי שתעלי כמה קבלות, יופיעו כאן גם הצעות למה שכנראה נגמר.
           ${
-            done.length
-              ? `<div class="sum-cart">
-                   <span>בעגלה</span>
-                   <b>₪${money(est.cart)}</b>
-                 </div>
-                 <form class="sum-actual" id="tripForm">
-                   <label for="actualInput">כמה שילמת בפועל?</label>
-                   <div class="sum-actual-row">
-                     <input id="actualInput" inputmode="decimal" placeholder="₪" autocomplete="off">
-                     <button class="btn" type="submit">סיום קנייה</button>
-                   </div>
-                 </form>`
+            last
+              ? `<p class="last-trip">בקנייה הקודמת (${dateHe(last.date)}): משוער ₪${money(last.estimate)}${
+                  last.actual != null ? `, שולם ₪${money(last.actual)} (${diff > 0 ? `₪${money(diff)} יותר` : diff < 0 ? `₪${money(-diff)} פחות` : 'בדיוק'})` : ''
+                }</p>`
               : ''
           }
-        </section>`;
-    } else if (last) {
-      const diff = last.actual != null ? round2(last.actual - last.estimate) : null;
-      summaryHtml = `
-        <section class="summary quiet" aria-label="הקנייה הקודמת">
-          <span class="sum-label">הקנייה הקודמת, ${dateHe(last.date)}</span>
-          <span class="sum-line">משוער ₪${money(last.estimate)}${
-            last.actual != null ? `, שולם ₪${money(last.actual)} (${diff > 0 ? `₪${money(diff)} יותר` : diff < 0 ? `₪${money(-diff)} פחות` : 'בדיוק'})` : ''
-          }</span>
-        </section>`;
+        </div>`;
+    }
+
+    // ---- floating total bar ----
+    const est = store.estimate();
+    let barHtml = '';
+    if (list.length) {
+      const unpriced = est.unpriced ? ` · ${est.unpriced} בלי מחיר` : '';
+      barHtml = ui.finishing
+        ? `<form class="cartbar finishing" id="tripForm" aria-label="סיום קנייה">
+             <div class="bar-text">
+               <label for="actualInput" class="bar-label">כמה שילמת בפועל? (משוער ₪${money(est.cart || est.all)})</label>
+               <input id="actualInput" inputmode="decimal" placeholder="₪" autocomplete="off">
+             </div>
+             <div class="bar-actions">
+               <button class="bar-btn" type="submit">שמירה</button>
+               <button class="bar-link" type="button" data-act="cancel-finish">ביטול</button>
+             </div>
+           </form>`
+        : `<div class="cartbar" role="region" aria-label="סיכום">
+             <div class="bar-text">
+               <span class="bar-label">משוער · בעגלה ${done.length}/${list.length}${unpriced}</span>
+               <span class="bar-value">₪${money(est.all)}</span>
+             </div>
+             <button class="bar-btn" data-act="finish" ${done.length ? '' : 'disabled'} title="${done.length ? '' : 'מסמנים מוצרים בעגלה, ואז מסיימים'}">סיום קנייה</button>
+           </div>`;
     }
 
     const joinHtml =
@@ -266,20 +293,22 @@
 
     view.innerHTML = `
       ${joinHtml}
-      ${summaryHtml}
       <form class="add" id="addForm">
         <label class="sr-only" for="addInput">מוצר להוספה</label>
         <input id="addInput" list="productNames" placeholder="מה צריך לקנות?" autocomplete="off" enterkeyhint="done">
-        <button class="btn" type="submit">הוספה</button>
+        <button class="add-btn" type="submit" aria-label="הוספה"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       </form>
-      ${list.length ? `<h2>ברשימה (${open.length})</h2>` : ''}
-      <ul class="list">${open.map(itemHtml).join('')}</ul>
-      ${empty}
       ${suggestHtml}
-      ${done.length ? `<h2>בעגלה (${done.length})</h2><ul class="list">${done.map(itemHtml).join('')}</ul>
-        <div class="list-actions"><button class="link" data-act="clear">ניקוי מה שבעגלה</button></div>` : ''}
+      ${sectionsHtml}
+      ${done.length ? `<div class="list-actions"><button class="link" data-act="clear">ניקוי מה שבעגלה בלי לשמור קנייה</button></div>` : ''}
+      ${emptyHtml}
+      ${barHtml}
     `;
-    document.getElementById('topMeta').textContent = open.length ? `${open.length} פריטים` : '';
+    document.body.classList.toggle('has-bar', !!barHtml);
+    const sections = groups.length;
+    document.getElementById('topMeta').textContent = open.length
+      ? `${open.length} פריטים · ${sections === 1 ? 'מחלקה אחת' : `${sections} מחלקות`}`
+      : '';
   }
 
   // ---------- receipts screen ----------
@@ -419,6 +448,12 @@
                        <button class="btn small" type="submit">שמירה</button>
                      </div>
                      <span class="sub">בקבלות: ${store.rawNamesOf(p.id).map(esc).join(', ') || 'אין'}</span>
+                     <label for="cat-${p.id}">מחלקה</label>
+                     <select id="cat-${p.id}" class="cat-select" data-category-for="${p.id}">
+                       ${window.KniyotCategories.CATEGORIES.map(
+                         (c) => `<option value="${c.id}" ${c.id === store.categoryOfProduct(p) ? 'selected' : ''}>${esc(c.name)}</option>`
+                       ).join('')}
+                     </select>
                    </form>`
                 : ''
             }
@@ -554,9 +589,18 @@
       const typed = input.value.trim();
       const item = store.addToList(typed);
       if (item) {
-        input.value = ''; // clear before re-render, which keeps whatever is in a focused field
+        // Phone keyboards can re-type a word that was still being composed after we
+        // clear the box, so end the composition first (blur), then clear, and check again.
+        input.blur();
+        input.value = '';
         render();
-        document.getElementById('addInput').focus();
+        const fresh = document.getElementById('addInput');
+        fresh.value = '';
+        fresh.focus();
+        setTimeout(() => {
+          const el = document.getElementById('addInput');
+          if (el && el.value.trim() === typed) el.value = '';
+        }, 80);
         if (item.name !== typed) toast(`נוסף כ"${item.name}", כמו בקבלה`);
       }
       return;
@@ -584,6 +628,7 @@
         return;
       }
       const trip = store.finishTrip(actual);
+      ui.finishing = false;
       if (trip.actual != null && trip.estimate) {
         const diff = round2(trip.actual - trip.estimate);
         toast(
@@ -695,6 +740,14 @@
       cloud.leave();
       toast('השיתוף הופסק בטלפון הזה');
       render();
+    } else if (t.dataset.act === 'finish') {
+      ui.finishing = true;
+      render();
+      const input = document.getElementById('actualInput');
+      if (input) input.focus();
+    } else if (t.dataset.act === 'cancel-finish') {
+      ui.finishing = false;
+      render();
     } else if (t.dataset.act === 'more-suggestions' || t.dataset.act === 'less-suggestions') {
       ui.allSuggestions = t.dataset.act === 'more-suggestions';
       render();
@@ -748,6 +801,11 @@
   });
 
   view.addEventListener('change', async (e) => {
+    if (e.target.dataset && e.target.dataset.categoryFor) {
+      store.setCategory(e.target.dataset.categoryFor, e.target.value);
+      toast(`הועבר למחלקה: ${window.KniyotCategories.BY_ID[e.target.value].name}`);
+      return;
+    }
     if (e.target.id === 'pdfInput' && e.target.files[0]) {
       const file = e.target.files[0];
       toast('קורא את הקבלה…');
