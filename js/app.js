@@ -554,6 +554,7 @@
       const typed = input.value.trim();
       const item = store.addToList(typed);
       if (item) {
+        input.value = ''; // clear before re-render, which keeps whatever is in a focused field
         render();
         document.getElementById('addInput').focus();
         if (item.name !== typed) toast(`נוסף כ"${item.name}", כמו בקבלה`);
