@@ -201,7 +201,7 @@
       <nav class="lists-bar" aria-label="רשימות">
         ${pill(null, 'קניות', openCount(null))}
         ${store.extraLists().map((l) => pill(l.id, l.name, openCount(l.id))).join('')}
-        <button class="list-pill add" data-act="new-list" aria-label="רשימה חדשה">+ רשימה</button>
+        <button class="list-pill new-pill" data-act="new-list" aria-label="רשימה חדשה">+ רשימה</button>
       </nav>
       ${
         ui.creatingList

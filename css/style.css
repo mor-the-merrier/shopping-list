@@ -654,6 +654,7 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
 /* ---------- list switcher ---------- */
 .lists-bar {
   display: flex;
+  align-items: center;
   gap: 8px;
   overflow-x: auto;
   padding: 2px 0 12px;
@@ -673,19 +674,22 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
   background: var(--surface);
   color: var(--ink);
   border-radius: 999px;
-  padding: 7px 14px;
-  min-height: 40px;
+  padding: 0 14px;
+  height: 42px; /* same height with or without a count badge */
+  line-height: 1;
   font-weight: 600;
 }
 
 .list-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
-.list-pill.add { border-style: dashed; color: var(--accent-strong); background: transparent; }
+.list-pill.new-pill { border-style: dashed; color: var(--accent-strong); background: transparent; }
 
 .pill-count {
   font-size: 13px;
   font-weight: 700;
   min-width: 22px;
+  height: 22px;
+  line-height: 22px;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--accent-soft);
