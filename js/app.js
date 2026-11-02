@@ -116,7 +116,7 @@
 
   function priceTag(stats) {
     if (!stats) return '';
-    return `<span class="price" aria-label="בדרך כלל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}">₪${money(stats.usualPrice)}${
+    return `<span class="price" aria-label="בערך ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(stats.usualPrice)}</bdi>${
       stats.weighted ? '<small> לק״ג</small>' : ''
     }</span>`;
   }
@@ -190,7 +190,7 @@
         }
       }
       const price = stats
-        ? `<span class="price" aria-label="בדרך כלל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}">₪${money(stats.usualPrice)}${
+        ? `<span class="price" aria-label="בערך ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(stats.usualPrice)}</bdi>${
             stats.weighted ? '<small> לק״ג</small>' : ''
           }</span>`
         : `<span class="price none">אין מחיר</span>`;
@@ -272,7 +272,7 @@
         : `<div class="cartbar" role="region" aria-label="סיכום">
              <div class="bar-text">
                <span class="bar-label">משוער · בעגלה ${done.length}/${list.length}${unpriced}</span>
-               <span class="bar-value">₪${money(est.all)}</span>
+               <span class="bar-value"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(est.all)}</bdi></span>
              </div>
              <button class="bar-btn" data-act="finish" ${done.length ? '' : 'disabled'} title="${done.length ? '' : 'מסמנים מוצרים בעגלה, ואז מסיימים'}">סיום קנייה</button>
            </div>`;

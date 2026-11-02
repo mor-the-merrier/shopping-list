@@ -39,71 +39,7 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #120f1e;
-    --surface: #1c1830;
-    --ink: #ece9f7;
-    --muted: #a8a1c2;
-    --faint: #7d7796;
-    --line: #2b2645;
-    --check: #4a4270;
-    --accent: #a08bff;
-    --accent-ink: #160f33;
-    --accent-soft: #2a2252;
-    --accent-strong: #cbbeff;
-    --bar-bg: #ece9ff;
-    --bar-ink: #1b1530;
-    --good: #5fd08f;
-    --good-soft: #17352a;
-    --warn: #f3946a;
-    --warn-soft: #3b2219;
-    --t-green-bg: #183324; --t-green-ink: #9bddb0;
-    --t-amber-bg: #3a2c10; --t-amber-ink: #f2c878;
-    --t-blue-bg: #172a47; --t-blue-ink: #a9c6f3;
-    --t-red-bg: #3d1a1c; --t-red-ink: #f4a9a9;
-    --t-orange-bg: #3d2414; --t-orange-ink: #f6b98c;
-    --t-cyan-bg: #10333b; --t-cyan-ink: #94dceb;
-    --t-teal-bg: #12352f; --t-teal-ink: #8fdccd;
-    --t-pink-bg: #3b1729; --t-pink-ink: #f3a6ca;
-    --t-yellow-bg: #36300f; --t-yellow-ink: #ead57a;
-    --t-purple-bg: #2a2050; --t-purple-ink: #c9b6fa;
-    --t-gray-bg: #26243a; --t-gray-ink: #c2bfd2;
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme='dark'] {
-  --bg: #120f1e;
-  --surface: #1c1830;
-  --ink: #ece9f7;
-  --muted: #a8a1c2;
-  --faint: #7d7796;
-  --line: #2b2645;
-  --check: #4a4270;
-  --accent: #a08bff;
-  --accent-ink: #160f33;
-  --accent-soft: #2a2252;
-  --accent-strong: #cbbeff;
-  --bar-bg: #ece9ff;
-  --bar-ink: #1b1530;
-  --good: #5fd08f;
-  --good-soft: #17352a;
-  --warn: #f3946a;
-  --warn-soft: #3b2219;
-  --t-green-bg: #183324; --t-green-ink: #9bddb0;
-  --t-amber-bg: #3a2c10; --t-amber-ink: #f2c878;
-  --t-blue-bg: #172a47; --t-blue-ink: #a9c6f3;
-  --t-red-bg: #3d1a1c; --t-red-ink: #f4a9a9;
-  --t-orange-bg: #3d2414; --t-orange-ink: #f6b98c;
-  --t-cyan-bg: #10333b; --t-cyan-ink: #94dceb;
-  --t-teal-bg: #12352f; --t-teal-ink: #8fdccd;
-  --t-pink-bg: #3b1729; --t-pink-ink: #f3a6ca;
-  --t-yellow-bg: #36300f; --t-yellow-ink: #ead57a;
-  --t-purple-bg: #2a2050; --t-purple-ink: #c9b6fa;
-  --t-gray-bg: #26243a; --t-gray-ink: #c2bfd2;
-  color-scheme: dark;
-}
+/* One light look on every phone, also when the phone is set to dark mode. */
 
 * { box-sizing: border-box; }
 
@@ -665,3 +601,6 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
 }
+
+/* "~" before a price: this is what we expect to pay, not a fixed price. */
+.approx { font-weight: 400; opacity: 0.6; margin-inline-end: 1px; }

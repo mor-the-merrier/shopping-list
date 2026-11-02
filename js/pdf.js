@@ -164,5 +164,5 @@
     return (await pdfToTexts(file))[0].text;
   }
 
-  root.PdfText = { pdfToText, pdfToTexts, linesSpaced, linesJoined, linesStreamOrder, linesStreamTight, rowsOf, cleanItems };
+  root.PdfText = { loadPdfJs, pdfToText, pdfToTexts, linesSpaced, linesJoined, linesStreamOrder, linesStreamTight, rowsOf, cleanItems };
 })(window);
