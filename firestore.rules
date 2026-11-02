@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Security rules for the shopping app.
+// Paste into Firebase console → Firestore Database → Rules → Publish.
+//
+// A household's data can be read and changed only by its members.
+// The household code is long and random, so knowing it (from the invite link)
+// is what lets someone join. Joining can only add yourself to the members list.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(hid) {
+      return signedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    }
+
+    match /households/{hid} {
+      // Reading one household by its code is how the invite link works.
+      // Listing all households is not allowed.
+      allow get: if signedIn();
+
+      allow create: if signedIn()
+        && hid.size() >= 16
+        && request.resource.data.members == [request.auth.uid];
+
+      allow update: if signedIn() && (
+        // members can update the household
+        request.auth.uid in resource.data.members
+        // or someone with the code adds only themselves
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+            && request.resource.data.members.hasAll(resource.data.members)
+            && request.resource.data.members.removeAll(resource.data.members) == [request.auth.uid])
+      );
+
+      allow delete: if false;
+
+      // list, receipts, trips, meta/catalog
+      match /{collection}/{docId} {
+        allow read, write: if isMember(hid);
+      }
+    }
+  }
+}

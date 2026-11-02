@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#1f63d6"/>
+  <path d="M120 196 L180 136 H392 V376 H180 L120 316 Z" fill="#ffd43b"/>
+  <circle cx="176" cy="256" r="18" fill="#1f63d6"/>
+  <text x="300" y="300" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="130" fill="#2a2200">₪</text>
+</svg>

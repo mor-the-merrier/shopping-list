@@ -1,0 +1,788 @@
+/*
+ * UI: four screens (list, receipts, products, family). Plain DOM, no framework.
+ */
+(function () {
+  'use strict';
+
+  const { Store } = window.KniyotStore;
+  const store = Store.load();
+
+  const ui = {
+    tab: 'list',
+    expanded: null, // list item id with open details
+    pending: null, // { parsed, duplicate, text }
+    unknown: null, // codes waiting to be named after a save
+    productQuery: '',
+    editing: null, // product id being renamed
+    confirmDelete: null, // receipt id waiting for a second tap
+    pendingJoin: null, // household code from an invite link
+    joinError: '',
+    busy: false, // a create/join is in progress
+    confirmLeave: false,
+  };
+
+  // ---------- family sharing (Firebase) ----------
+  let cloud = null;
+  if (window.KniyotCloud && /^https?:$/.test(location.protocol)) {
+    const { Cloud, firebaseAdapter } = window.KniyotCloud;
+    // window.__kniyotTestAdapter lets browser tests use a simulated Firebase.
+    cloud = new Cloud(store, window.__kniyotTestAdapter || firebaseAdapter(), {
+      storage: (() => {
+        try {
+          return window.localStorage;
+        } catch (e) {
+          return null;
+        }
+      })(),
+      onUpdate: () => render(),
+      inviteBase: location.origin + location.pathname,
+    });
+  }
+  const params = new URLSearchParams(location.search);
+  if (params.get('join')) ui.pendingJoin = params.get('join');
+
+  function clearJoinParam() {
+    ui.pendingJoin = null;
+    try {
+      history.replaceState(null, '', location.pathname);
+    } catch (e) {
+      /* not allowed in some frames */
+    }
+  }
+
+  function cloudErrorText(err) {
+    const code = (err && (err.code || err.message)) || '';
+    if (/permission/i.test(code)) return 'אין הרשאה לרשימה הזו. אם זו הפעם הראשונה, צריך להדביק את כללי האבטחה ב־Firebase (מוסבר ב־README).';
+    if (/operation-not-allowed|admin-restricted/i.test(code)) return 'צריך להפעיל כניסה אנונימית ב־Firebase (Authentication ← Sign-in method ← Anonymous).';
+    if (/unavailable|network|offline/i.test(code)) return 'אין חיבור לאינטרנט. השינויים נשמרים ויסתנכרנו כשהחיבור יחזור.';
+    return (err && err.message) || 'משהו השתבש בסנכרון.';
+  }
+
+  const view = document.getElementById('view');
+  const ICON_CHECK =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
+
+  // ---------- helpers ----------
+  const esc = (s) =>
+    String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const money = (n) => {
+    if (n == null || isNaN(n)) return '';
+    // Like a shelf tag: 18.90, 6.77, 79
+    const fixed = Number(n).toFixed(2);
+    return fixed.endsWith('.00') ? fixed.slice(0, -3) : fixed;
+  };
+
+  const dateHe = (iso) => {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${Number(d)}.${Number(m)}.${y}`;
+  };
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  const daysHe = (n) => (n === 0 ? 'היום' : n === 1 ? 'אתמול' : `לפני ${n} ימים`);
+
+  const everyHe = (n) => (n === 1 ? 'כל יום' : n === 7 ? 'כל שבוע' : n === 14 ? 'כל שבועיים' : `כל ~${n} ימים`);
+
+  const dueHe = (dueIn) => {
+    if (dueIn < 0) return `היה אמור להיגמר ${daysHe(-dueIn)}`;
+    if (dueIn === 0) return 'כנראה נגמר היום';
+    if (dueIn === 1) return 'כנראה ייגמר מחר';
+    return `כנראה ייגמר בעוד ${dueIn} ימים`;
+  };
+
+  function toast(msg) {
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.setAttribute('role', 'status');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2700);
+  }
+
+  /** Shorten a receipt name into a friendlier default ("ביצים 12 יח גדול" → "ביצים"). */
+  function suggestName(raw) {
+    let s = String(raw)
+      .replace(/\b\d+(?:\.\d+)?\s*(?:גרם|גר|ג|ק["״]?ג|קג|מ["״]?ל|מל|ליטר|ל|יח(?:'|׳)?|%)(?=\s|$)/g, '')
+      .replace(/\b\d+(?:\.\d+)?%?(?=\s|$)/g, '')
+      .replace(/\s+[א-ת]["״]?$/g, '') // trailing cut-off letter
+      .replace(/\s+(?:שקית|יח|במשקל|שקיל)(?=\s|$)/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return s || String(raw).trim();
+  }
+
+  function priceTag(stats, label = 'בד״כ') {
+    if (!stats) return '';
+    const top = stats.weighted ? `${label} לק״ג` : label;
+    return `<span class="tag" aria-label="מחיר רגיל ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}"><small>${top}</small><b>₪${money(
+      stats.usualPrice
+    )}</b></span>`;
+  }
+
+  function refreshDatalist() {
+    document.getElementById('productNames').innerHTML = store
+      .productList()
+      .map((p) => `<option value="${esc(p.name)}"></option>`)
+      .join('');
+  }
+
+  function setTab(tab) {
+    ui.tab = tab;
+    document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  // ---------- list screen ----------
+  function renderList() {
+    const list = store.state.list;
+    const open = list.filter((i) => !i.checked);
+    const done = list.filter((i) => i.checked);
+    const suggestions = store.suggestions();
+
+    const itemHtml = (item) => {
+      const product = store.matchProduct(item.name);
+      const stats = product ? store.stats(product.id) : null;
+      const isOpen = ui.expanded === item.id;
+      let detail = '';
+      if (isOpen) {
+        if (stats) {
+          const unit = stats.weighted ? ' לק״ג' : '';
+          detail = `
+            <div class="detail">
+              <dl class="facts">
+                <dt>מחיר רגיל</dt><dd>₪${money(stats.usualPrice)}${unit}</dd>
+                ${stats.maxPrice - stats.minPrice > 0.01 ? `<dt>טווח</dt><dd>₪${money(stats.minPrice)} עד ₪${money(stats.maxPrice)}</dd>` : ''}
+                <dt>פעם אחרונה</dt><dd>${daysHe(stats.daysSince)}, ₪${money(stats.lastPrice)}${
+                  stats.lastPaidEach < stats.lastPrice - 0.01 ? ` (במבצע ₪${money(stats.lastPaidEach)})` : ''
+                }</dd>
+                ${stats.every ? `<dt>תדירות</dt><dd>${everyHe(stats.every)}</dd>` : ''}
+              </dl>
+              <form class="compare" data-compare="${product.id}">
+                <label for="cmp-${item.id}">המחיר על המדף</label>
+                <input id="cmp-${item.id}" inputmode="decimal" placeholder="₪" autocomplete="off">
+                <span class="verdict-slot" aria-live="polite"></span>
+              </form>
+            </div>`;
+        } else {
+          detail = `<div class="detail">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</div>`;
+        }
+      }
+      return `
+        <li class="item${item.checked ? ' done' : ''}" data-id="${item.id}">
+          <div class="row">
+            <button class="check" data-act="toggle" aria-label="${item.checked ? 'ביטול סימון' : 'סימון'} ${esc(item.name)}" aria-pressed="${item.checked}">${ICON_CHECK}</button>
+            <button class="name" data-act="expand" aria-expanded="${isOpen}">${esc(item.name)}</button>
+            ${priceTag(stats)}
+          </div>
+          ${detail}
+        </li>`;
+    };
+
+    const SHOW = 6;
+    const shown = ui.allSuggestions ? suggestions : suggestions.slice(0, SHOW);
+    const hidden = suggestions.length - shown.length;
+    const suggestHtml = suggestions.length
+      ? `<h2>כנראה צריך לקנות</h2>
+         <div class="suggest">
+           ${shown
+             .map(
+               ({ product, stats }) => `
+             <span class="chip">
+               <button class="chip-add" data-suggest="${product.id}" aria-label="הוספת ${esc(product.name)} לרשימה">
+                 ${esc(product.name)}<small>${dueHe(stats.dueIn)}</small>
+               </button>
+               <button class="chip-x" data-dismiss="${product.id}" aria-label="להסתיר את ${esc(product.name)} לבינתיים">×</button>
+             </span>`
+             )
+             .join('')}
+         </div>
+         ${hidden > 0 ? `<button class="link" data-act="more-suggestions">עוד ${hidden} הצעות</button>` : ''}
+         ${ui.allSuggestions && suggestions.length > SHOW ? `<button class="link" data-act="less-suggestions">פחות הצעות</button>` : ''}`
+      : '';
+
+    const empty =
+      !list.length
+        ? `<div class="empty"><strong>הרשימה ריקה</strong>אפשר להוסיף מוצר בשורה למעלה. אחרי שתעלי כמה קבלות, יופיעו כאן גם הצעות למה שכנראה נגמר.</div>`
+        : '';
+
+    // ---- total summary ----
+    const est = store.estimate();
+    const last = store.lastTrip();
+    let summaryHtml = '';
+    if (list.length) {
+      const note = est.unpriced
+        ? `<span class="sum-note">לא כולל ${est.unpriced === 1 ? 'מוצר אחד' : `${est.unpriced} מוצרים`} בלי מחיר</span>`
+        : `<span class="sum-note">לפי מה שבדרך כלל קונים מכל מוצר</span>`;
+      summaryHtml = `
+        <section class="summary" aria-label="סיכום סכום">
+          <div class="sum-main">
+            <span class="sum-label">משוער לרשימה</span>
+            <span class="sum-value">₪${money(est.all)}</span>
+            ${note}
+          </div>
+          ${
+            done.length
+              ? `<div class="sum-cart">
+                   <span>בעגלה</span>
+                   <b>₪${money(est.cart)}</b>
+                 </div>
+                 <form class="sum-actual" id="tripForm">
+                   <label for="actualInput">כמה שילמת בפועל?</label>
+                   <div class="sum-actual-row">
+                     <input id="actualInput" inputmode="decimal" placeholder="₪" autocomplete="off">
+                     <button class="btn" type="submit">סיום קנייה</button>
+                   </div>
+                 </form>`
+              : ''
+          }
+        </section>`;
+    } else if (last) {
+      const diff = last.actual != null ? round2(last.actual - last.estimate) : null;
+      summaryHtml = `
+        <section class="summary quiet" aria-label="הקנייה הקודמת">
+          <span class="sum-label">הקנייה הקודמת, ${dateHe(last.date)}</span>
+          <span class="sum-line">משוער ₪${money(last.estimate)}${
+            last.actual != null ? `, שולם ₪${money(last.actual)} (${diff > 0 ? `₪${money(diff)} יותר` : diff < 0 ? `₪${money(-diff)} פחות` : 'בדיוק'})` : ''
+          }</span>
+        </section>`;
+    }
+
+    const joinHtml =
+      ui.pendingJoin && cloud && !cloud.hid
+        ? `<section class="panel invite-panel">
+             <h3>הוזמנת לרשימה משותפת</h3>
+             <p>אחרי ההצטרפות תראי את אותה רשימה, קבלות ומחירים כמו כל המשפחה. מה שכבר יש לך כאן יתווסף אליה.</p>
+             ${ui.joinError ? `<p class="notice">${esc(ui.joinError)}</p>` : ''}
+             <div class="actions">
+               <button class="btn" data-act="join-pending" ${ui.busy || cloud.status === 'connecting' ? 'disabled' : ''}>הצטרפות</button>
+               <button class="link" data-act="dismiss-join">לא עכשיו</button>
+             </div>
+           </section>`
+        : '';
+
+    view.innerHTML = `
+      ${joinHtml}
+      ${summaryHtml}
+      <form class="add" id="addForm">
+        <label class="sr-only" for="addInput">מוצר להוספה</label>
+        <input id="addInput" list="productNames" placeholder="מה צריך לקנות?" autocomplete="off" enterkeyhint="done">
+        <button class="btn" type="submit">הוספה</button>
+      </form>
+      ${list.length ? `<h2>ברשימה (${open.length})</h2>` : ''}
+      <ul class="list">${open.map(itemHtml).join('')}</ul>
+      ${empty}
+      ${suggestHtml}
+      ${done.length ? `<h2>בעגלה (${done.length})</h2><ul class="list">${done.map(itemHtml).join('')}</ul>
+        <div class="list-actions"><button class="link" data-act="clear">ניקוי מה שבעגלה</button></div>` : ''}
+    `;
+    document.getElementById('topMeta').textContent = open.length ? `${open.length} פריטים` : '';
+  }
+
+  // ---------- receipts screen ----------
+  function renderReceipts() {
+    let pendingHtml = '';
+    if (ui.pending) {
+      const { parsed, duplicate, text } = ui.pending;
+      const warnings = parsed.warnings.map((w) => `<p class="notice">${esc(w)}</p>`).join('');
+      if (!parsed.items.length) {
+        pendingHtml = `
+          <section class="panel">
+            <h3>לא הצלחתי לקרוא את הקבלה</h3>
+            <p>הטקסט שחולץ מהקובץ מופיע למטה. אם זו קבלה מרשת אחרת, אפשר להעתיק אותו ולשלוח כדי להוסיף לה תמיכה.</p>
+            <details><summary>הטקסט שחולץ</summary><pre class="debug">${esc(text)}</pre></details>
+            <div class="actions"><button class="btn secondary" data-act="cancel">סגירה</button></div>
+          </section>`;
+      } else {
+        pendingHtml = `
+          <section class="panel">
+            <h3>${esc(parsed.chain.name)}, ${dateHe(parsed.date)}</h3>
+            <p>${parsed.items.length} שורות, סה״כ ₪${money(parsed.total)}</p>
+            ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : warnings || '<p class="notice ok">כל השורות זוהו והסכום תואם לקבלה.</p>'}
+            <div class="actions">
+              ${duplicate ? '' : '<button class="btn" data-act="save-receipt">שמירת הקבלה</button>'}
+              <button class="btn secondary" data-act="cancel">ביטול</button>
+            </div>
+          </section>`;
+      }
+    }
+
+    let mapHtml = '';
+    if (ui.unknown && ui.unknown.length) {
+      mapHtml = `
+        <form class="panel" id="mapForm">
+          <h3>${ui.unknown.length} מוצרים חדשים</h3>
+          <p>איך לקרוא לכל אחד ברשימה? שם קצר כמו "חלב" עדיף. אם כותבים שם של מוצר שכבר קיים, הם יחוברו.</p>
+          ${ui.unknown
+            .map(
+              (u, i) => `
+            <div class="map-row">
+              <label for="map-${i}">${esc(u.rawName)}, ₪${money(u.unitPrice)}${u.weighted ? ' לק״ג' : ''}</label>
+              <input id="map-${i}" data-key="${esc(u.key)}" list="productNames" value="${esc(suggestName(u.rawName))}" autocomplete="off">
+            </div>`
+            )
+            .join('')}
+          <div class="actions"><button class="btn" type="submit">שמירת השמות</button></div>
+        </form>`;
+    }
+
+    const receipts = store.receiptsSorted();
+    const pastHtml = receipts.length
+      ? `<h2>קבלות שמורות (${receipts.length})</h2>
+         <ul class="rows">
+           ${receipts
+             .map(
+               (r) => `
+             <li>
+               <span class="grow">${esc(r.chainName)}<span class="sub">${dateHe(r.date)}, ${r.itemCount} שורות</span></span>
+               <span class="price">₪${money(r.total)}</span>
+               ${
+                 ui.confirmDelete === r.id
+                   ? `<button class="btn danger small solid" data-delete-receipt="${r.id}">למחוק?</button>
+                      <button class="link" data-act="keep-receipt">לא</button>`
+                   : `<button class="btn danger small" data-ask-delete="${r.id}" aria-label="מחיקת הקבלה מ־${dateHe(r.date)}">מחיקה</button>`
+               }
+             </li>`
+             )
+             .join('')}
+         </ul>`
+      : '';
+
+    view.innerHTML = `
+      ${ui.unknown && ui.unknown.length ? '' : `
+      <label class="upload">
+        <input type="file" id="pdfInput" accept="application/pdf,.pdf">
+        <strong>העלאת קבלה</strong>
+        <span>פותחים את הקישור מה־SMS, שומרים את ה־PDF ומעלים אותו כאן.</span>
+      </label>
+      <details class="paste">
+        <summary>או הדבקת הטקסט של הקבלה</summary>
+        <textarea id="pasteInput" placeholder="מדביקים כאן את כל הטקסט שבדף הקבלה"></textarea>
+        <button class="btn small" data-act="parse-paste">קריאת הקבלה</button>
+      </details>`}
+      ${pendingHtml}
+      ${mapHtml}
+      ${pastHtml}
+    `;
+    document.getElementById('topMeta').textContent = receipts.length ? `${receipts.length} קבלות` : '';
+  }
+
+  function handleParsed(text) {
+    const parsed = window.ReceiptParser.parse(text);
+    ui.pending = { parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text };
+    render();
+  }
+
+  // ---------- products screen ----------
+  function renderProducts() {
+    const q = ui.productQuery.trim().toLowerCase();
+    const products = store
+      .productList()
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || store.rawNamesOf(p.id).some((n) => n.toLowerCase().includes(q)));
+
+    const rows = products
+      .map((p) => {
+        const s = store.stats(p.id);
+        const sub = s
+          ? [s.every ? everyHe(s.every) : `נקנה ${s.timesBought === 1 ? 'פעם אחת' : `${s.timesBought} פעמים`}`, `לאחרונה ${daysHe(s.daysSince)}`].join(', ')
+          : 'אין קניות שמורות';
+        const editing = ui.editing === p.id;
+        return `
+          <li class="${editing ? 'editing' : ''}">
+            <div class="li-row">
+              <button class="grow" data-rename="${p.id}" aria-expanded="${editing}" aria-label="שינוי השם של ${esc(p.name)}">${esc(p.name)}<span class="sub">${sub}</span></button>
+              ${priceTag(s)}
+            </div>
+            ${
+              editing
+                ? `<form class="rename" data-rename-form="${p.id}">
+                     <label for="rn-${p.id}">שם ברשימה</label>
+                     <div class="rename-row">
+                       <input id="rn-${p.id}" list="productNames" value="${esc(p.name)}" autocomplete="off">
+                       <button class="btn small" type="submit">שמירה</button>
+                     </div>
+                     <span class="sub">בקבלות: ${store.rawNamesOf(p.id).map(esc).join(', ') || 'אין'}</span>
+                   </form>`
+                : ''
+            }
+          </li>`;
+      })
+      .join('');
+
+    view.innerHTML = `
+      ${store.productList().length ? `
+        <label class="sr-only" for="productSearch">חיפוש מוצר</label>
+        <input class="search" id="productSearch" type="search" placeholder="חיפוש מוצר" value="${esc(ui.productQuery)}">
+        <ul class="rows">${rows || '<li class="empty">לא נמצא מוצר בשם הזה.</li>'}</ul>
+        <p class="hint">לחיצה על מוצר משנה את השם שלו. שינוי לשם של מוצר קיים מחבר ביניהם.</p>`
+        : `<div class="empty"><strong>עוד אין מוצרים</strong>המוצרים נוצרים מהקבלות. אפשר להתחיל במסך הקבלות.</div>`}
+    `;
+    document.getElementById('topMeta').textContent = store.productList().length ? `${store.productList().length} מוצרים` : '';
+  }
+
+  // ---------- family screen ----------
+  function joinFormHtml(prefill) {
+    return `
+      <form class="join" id="joinForm">
+        <label for="joinInput">יש לך קישור הזמנה או קוד?</label>
+        <div class="rename-row">
+          <input id="joinInput" value="${esc(prefill || '')}" placeholder="מדביקים כאן את הקישור" autocomplete="off" dir="ltr">
+          <button class="btn small" type="submit" ${ui.busy ? 'disabled' : ''}>הצטרפות</button>
+        </div>
+        ${ui.joinError ? `<p class="notice">${esc(ui.joinError)}</p>` : ''}
+      </form>`;
+  }
+
+  function familyHtml() {
+    if (!cloud) {
+      return `<p class="hint">השיתוף עם המשפחה עובד באתר עצמו, אחרי שהוא עולה ל־GitHub. בתצוגה המקדימה הנתונים נשמרים רק בדפדפן הזה.</p>`;
+    }
+    const s = cloud.status;
+    if (s === 'off' || s === 'connecting') return `<p class="hint">מתחבר…</p>`;
+    if (s === 'unavailable') {
+      return `<p class="notice">השיתוף לא זמין כרגע. ${esc(cloudErrorText(cloud.error))}</p>
+              <p class="hint">בינתיים הכול נשמר בטלפון הזה.</p>`;
+    }
+    if (cloud.hid) {
+      const link = cloud.inviteLink();
+      const others = Math.max(0, cloud.members - 1);
+      return `
+        <div class="panel family">
+          <h3>הרשימה משותפת</h3>
+          <p>${others ? `עוד ${others === 1 ? 'מכשיר אחד מחובר' : `${others} מכשירים מחוברים`} לרשימה.` : 'עוד אף אחד לא הצטרף. שלחי את הקישור לבני המשפחה.'}</p>
+          ${s === 'error' ? `<p class="notice">${esc(cloudErrorText(cloud.error))}</p>` : '<p class="notice ok">מסונכרן. כל שינוי מופיע אצל כולם.</p>'}
+          <label class="field-label" for="inviteLink">קישור הזמנה</label>
+          <input id="inviteLink" class="invite" value="${esc(link)}" readonly dir="ltr">
+          <div class="actions">
+            <button class="btn small" data-act="copy-invite">העתקת הקישור</button>
+            ${navigator.share ? '<button class="btn secondary small" data-act="share-invite">שליחה</button>' : ''}
+          </div>
+          <p class="hint">שמרי את הקישור. הוא גם הדרך לחזור לרשימה אם מחליפים טלפון.</p>
+        </div>
+        <div class="actions">
+          ${
+            ui.confirmLeave
+              ? `<button class="btn danger small solid" data-act="leave">להפסיק לשתף בטלפון הזה?</button>
+                 <button class="link" data-act="keep-sharing">לא</button>`
+              : `<button class="link" data-act="ask-leave">הפסקת שיתוף בטלפון הזה</button>`
+          }
+        </div>`;
+    }
+    return `
+      <div class="panel family">
+        <h3>רשימה אחת לכל המשפחה</h3>
+        <p>כולם רואים את אותה רשימה, אותן קבלות ואותם מחירים. מי שמסמן משהו בסופר, זה מסומן אצל כולם. לא צריך חשבון או סיסמה.</p>
+        ${s === 'error' ? `<p class="notice">${esc(cloudErrorText(cloud.error))}</p>` : ''}
+        <div class="actions">
+          <button class="btn" data-act="create-household" ${ui.busy ? 'disabled' : ''}>יצירת רשימה משותפת</button>
+        </div>
+      </div>
+      ${joinFormHtml(ui.pendingJoin)}`;
+  }
+
+  function renderFamily() {
+    view.innerHTML = `
+      ${familyHtml()}
+      <h2>גיבוי</h2>
+      <p class="hint">${cloud && cloud.hid ? 'הנתונים שמורים בענן. אפשר גם להוריד עותק לגיבוי נוסף.' : 'הנתונים שמורים רק בטלפון הזה. כדאי לשמור גיבוי מדי פעם.'}</p>
+      <div class="actions">
+        <button class="btn secondary small" data-act="export">הורדת גיבוי</button>
+        <label class="btn secondary small" style="cursor:pointer">שחזור מגיבוי<input type="file" id="importInput" accept="application/json,.json" class="sr-only"></label>
+      </div>
+    `;
+    document.getElementById('topMeta').textContent = cloud && cloud.hid ? 'משותף' : '';
+  }
+
+  // ---------- render ----------
+  function render() {
+    // Keep what the user is typing when a change from the family re-renders the screen.
+    const active = document.activeElement;
+    const keep = active && active.id && view.contains(active) && /^(INPUT|TEXTAREA)$/.test(active.tagName)
+      ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
+      : null;
+
+    refreshDatalist();
+    if (ui.tab === 'list') renderList();
+    else if (ui.tab === 'receipts') renderReceipts();
+    else if (ui.tab === 'products') renderProducts();
+    else renderFamily();
+
+    if (keep) {
+      const el = document.getElementById(keep.id);
+      if (el) {
+        el.value = keep.value;
+        el.focus();
+        try {
+          el.setSelectionRange(keep.start, keep.end);
+        } catch (e) {
+          /* some input types have no selection */
+        }
+      }
+    }
+  }
+
+  // ---------- events ----------
+  document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
+  view.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const form = e.target;
+
+    if (form.id === 'addForm') {
+      const input = form.querySelector('input');
+      const typed = input.value.trim();
+      const item = store.addToList(typed);
+      if (item) {
+        render();
+        document.getElementById('addInput').focus();
+        if (item.name !== typed) toast(`נוסף כ"${item.name}", כמו בקבלה`);
+      }
+      return;
+    }
+
+    if (form.dataset.compare) {
+      const input = form.querySelector('input');
+      const shelf = parseFloat(input.value.replace(',', '.').replace('₪', ''));
+      const s = store.stats(form.dataset.compare);
+      const slot = form.querySelector('.verdict-slot');
+      if (!s || isNaN(shelf)) return;
+      const diff = (shelf - s.usualPrice) / s.usualPrice;
+      let cls = 'normal', txt = 'מחיר רגיל';
+      if (diff <= -0.05) { cls = 'cheap'; txt = `זול ב־${Math.round(-diff * 100)}% מהרגיל`; }
+      else if (diff >= 0.05) { cls = 'pricey'; txt = `יקר ב־${Math.round(diff * 100)}% מהרגיל`; }
+      slot.innerHTML = `<span class="verdict ${cls}">${txt}</span>`;
+      return;
+    }
+
+    if (form.id === 'tripForm') {
+      const raw = form.querySelector('input').value.replace(',', '.').replace('₪', '').trim();
+      const actual = raw ? parseFloat(raw) : null;
+      if (raw && isNaN(actual)) {
+        toast('הסכום צריך להיות מספר, למשל 142.50');
+        return;
+      }
+      const trip = store.finishTrip(actual);
+      if (trip.actual != null && trip.estimate) {
+        const diff = round2(trip.actual - trip.estimate);
+        toast(
+          diff > 0.5
+            ? `הקנייה נשמרה. יצא ₪${money(diff)} יותר מהמשוער`
+            : diff < -0.5
+            ? `הקנייה נשמרה. יצא ₪${money(-diff)} פחות מהמשוער`
+            : 'הקנייה נשמרה. יצא בדיוק כמו המשוער'
+        );
+      } else {
+        toast('הקנייה נשמרה');
+      }
+      render();
+      return;
+    }
+
+    if (form.id === 'joinForm') {
+      joinWith(form.querySelector('input').value);
+      return;
+    }
+
+    if (form.dataset.renameForm) {
+      const p = store.state.products[form.dataset.renameForm];
+      const name = form.querySelector('input').value.trim();
+      ui.editing = null;
+      if (p && name && name !== p.name) {
+        const merging = store.findProductByName(name);
+        store.renameProduct(p.id, name);
+        toast(merging ? `חובר אל ${merging.name}` : 'השם עודכן');
+      }
+      render();
+      return;
+    }
+
+    if (form.id === 'mapForm') {
+      form.querySelectorAll('input[data-key]').forEach((input) => {
+        const name = input.value.trim() || input.closest('.map-row').querySelector('label').textContent.split(',')[0];
+        store.assignCode(input.dataset.key, name);
+      });
+      store.resolveListNames(); // new products may now match items on the list
+      store.save();
+      const n = ui.unknown.length;
+      ui.unknown = null;
+      toast(`נשמרו ${n} מוצרים`);
+      render();
+    }
+  });
+
+  view.addEventListener('click', (e) => {
+    const t = e.target.closest('button, [data-act]');
+    if (!t) return;
+    const li = t.closest('.item');
+
+    if (t.dataset.act === 'toggle' && li) {
+      store.toggleItem(li.dataset.id);
+      render();
+    } else if (t.dataset.act === 'expand' && li) {
+      ui.expanded = ui.expanded === li.dataset.id ? null : li.dataset.id;
+      render();
+    } else if (t.dataset.act === 'create-household' && cloud) {
+      ui.busy = true;
+      render();
+      cloud
+        .createHousehold()
+        .then(() => toast('הרשימה המשותפת מוכנה'))
+        .catch((err) => {
+          console.error(err);
+          toast(cloudErrorText(err));
+        })
+        .finally(() => {
+          ui.busy = false;
+          render();
+        });
+    } else if (t.dataset.act === 'join-pending') {
+      joinWith(ui.pendingJoin);
+    } else if (t.dataset.act === 'dismiss-join') {
+      clearJoinParam();
+      render();
+    } else if (t.dataset.act === 'copy-invite' && cloud) {
+      const link = cloud.inviteLink();
+      const input = document.getElementById('inviteLink');
+      (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject())
+        .then(() => toast('הקישור הועתק'))
+        .catch(() => {
+          input.select();
+          toast('הקישור מסומן. אפשר להעתיק אותו');
+        });
+    } else if (t.dataset.act === 'share-invite' && cloud) {
+      navigator.share({ title: 'רשימת הקניות שלנו', text: 'הצטרפות לרשימת הקניות המשותפת:', url: cloud.inviteLink() }).catch(() => {});
+    } else if (t.dataset.act === 'ask-leave') {
+      ui.confirmLeave = true;
+      render();
+    } else if (t.dataset.act === 'keep-sharing') {
+      ui.confirmLeave = false;
+      render();
+    } else if (t.dataset.act === 'leave' && cloud) {
+      ui.confirmLeave = false;
+      cloud.leave();
+      toast('השיתוף הופסק בטלפון הזה');
+      render();
+    } else if (t.dataset.act === 'more-suggestions' || t.dataset.act === 'less-suggestions') {
+      ui.allSuggestions = t.dataset.act === 'more-suggestions';
+      render();
+    } else if (t.dataset.act === 'clear') {
+      store.clearChecked();
+      render();
+    } else if (t.dataset.suggest) {
+      const p = store.state.products[t.dataset.suggest];
+      store.addToList(p.name);
+      toast(`${p.name} נוסף לרשימה`);
+      render();
+    } else if (t.dataset.dismiss) {
+      store.dismissSuggestion(t.dataset.dismiss);
+      render();
+    } else if (t.dataset.act === 'parse-paste') {
+      const text = document.getElementById('pasteInput').value;
+      if (text.trim()) handleParsed(text);
+    } else if (t.dataset.act === 'save-receipt' && ui.pending) {
+      const { unknown } = store.importReceipt(ui.pending.parsed);
+      ui.pending = null;
+      ui.unknown = unknown;
+      toast('הקבלה נשמרה');
+      render();
+    } else if (t.dataset.act === 'cancel') {
+      ui.pending = null;
+      render();
+    } else if (t.dataset.askDelete) {
+      ui.confirmDelete = t.dataset.askDelete;
+      render();
+    } else if (t.dataset.act === 'keep-receipt') {
+      ui.confirmDelete = null;
+      render();
+    } else if (t.dataset.deleteReceipt) {
+      store.deleteReceipt(t.dataset.deleteReceipt);
+      ui.confirmDelete = null;
+      toast('הקבלה נמחקה');
+      render();
+    } else if (t.dataset.rename) {
+      ui.editing = ui.editing === t.dataset.rename ? null : t.dataset.rename;
+      render();
+      const input = document.getElementById(`rn-${ui.editing}`);
+      if (input) input.focus();
+    } else if (t.dataset.act === 'export') {
+      const blob = new Blob([store.exportJSON()], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `kniyot-backup-${window.KniyotStore.todayISO()}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+  });
+
+  view.addEventListener('change', async (e) => {
+    if (e.target.id === 'pdfInput' && e.target.files[0]) {
+      const file = e.target.files[0];
+      toast('קורא את הקבלה…');
+      try {
+        const text = await window.PdfText.pdfToText(file);
+        handleParsed(text);
+      } catch (err) {
+        console.error(err);
+        toast(err.message || 'לא הצלחתי לפתוח את הקובץ');
+      }
+    } else if (e.target.id === 'importInput' && e.target.files[0]) {
+      try {
+        store.importJSON(await e.target.files[0].text());
+        toast('הגיבוי שוחזר');
+        render();
+      } catch (err) {
+        toast(err.message);
+      }
+    }
+  });
+
+  view.addEventListener('input', (e) => {
+    if (e.target.form && e.target.form.dataset.compare) {
+      e.target.form.requestSubmit();
+    } else if (e.target.id === 'productSearch') {
+      ui.productQuery = e.target.value;
+      const pos = e.target.selectionStart;
+      renderProducts();
+      const input = document.getElementById('productSearch');
+      input.focus();
+      input.setSelectionRange(pos, pos);
+    }
+  });
+
+  function joinWith(code) {
+    if (!cloud || ui.busy) return;
+    ui.busy = true;
+    ui.joinError = '';
+    render();
+    cloud
+      .joinHousehold(code)
+      .then(() => {
+        clearJoinParam();
+        store.resolveListNames();
+        toast('הצטרפת לרשימה המשותפת');
+        setTab('list');
+      })
+      .catch((err) => {
+        console.error(err);
+        ui.joinError = err.code ? cloudErrorText(err) : err.message;
+      })
+      .finally(() => {
+        ui.busy = false;
+        render();
+      });
+  }
+
+  // Ask the browser not to clear this site's data when space runs low.
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  } catch (e) {
+    /* not supported */
+  }
+
+  store.resolveListNames();
+  render();
+  if (cloud) cloud.start();
+})();
