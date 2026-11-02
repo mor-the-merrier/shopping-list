@@ -21,7 +21,7 @@ function createBackend() {
     for (const cb of listeners[hid] || []) {
       setImmediate(() => {
         cb('household', clone(h.data));
-        for (const c of ['list', 'receipts', 'trips']) cb(c, clone(h[c]));
+        for (const c of ['list', 'receipts', 'trips', 'lists']) cb(c, clone(h[c]));
         cb('catalog', h.catalog ? clone(h.catalog) : null);
       });
     }
@@ -38,7 +38,7 @@ function createBackend() {
         return households[hid] ? clone(households[hid].data) : null;
       },
       async createHousehold(hid, data) {
-        households[hid] = { data: clone(data), list: {}, receipts: {}, trips: {}, catalog: null };
+        households[hid] = { data: clone(data), list: {}, receipts: {}, trips: {}, lists: {}, catalog: null };
       },
       async joinHousehold(hid, u) {
         households[hid].data.members.push(u);
@@ -46,7 +46,7 @@ function createBackend() {
       },
       async fetchAll(hid) {
         const h = households[hid];
-        return clone({ list: h.list, receipts: h.receipts, trips: h.trips, catalog: h.catalog });
+        return clone({ list: h.list, receipts: h.receipts, trips: h.trips, lists: h.lists, catalog: h.catalog });
       },
       subscribe(hid, cb) {
         (listeners[hid] = listeners[hid] || []).push(cb);
@@ -163,6 +163,31 @@ function memoryStorage() {
   await tick();
   assert.strictEqual(storeA.state.receipts.length, 0);
   assert.strictEqual(storeA.state.purchases.length, 0);
+
+  // --- Extra lists sync, and same-named lists merge on join ---
+  const pharmA = storeA.addList('פארם');
+  storeA.addToList('אקמול', pharmA.id);
+  await tick();
+  await tick();
+  assert.deepStrictEqual(storeB.extraLists().map((l) => l.name), ['פארם'], 'B sees the new list');
+  assert.deepStrictEqual(storeB.itemsOf(pharmA.id).map((i) => i.name), ['אקמול'], 'B sees its items');
+  storeB.toggleItem(storeB.itemsOf(pharmA.id)[0].id);
+  await tick();
+  await tick();
+  assert.ok(storeA.itemsOf(pharmA.id)[0].checked, 'A sees B check it off');
+  assert.strictEqual(storeA.itemsOf(null).some((i) => i.name === 'אקמול'), false, 'not on the main list');
+
+  const storeD = new Store();
+  const pharmD = storeD.addList('פארם');
+  storeD.addToList('משחת שיניים', pharmD.id);
+  storeD.addToList('אקמול', pharmD.id); // open on D, checked on the shared list → kept as a new open item
+  const cloudD = new Cloud(storeD, backend.adapterFor(), { storage: memoryStorage() });
+  await cloudD.start();
+  await cloudD.joinHousehold(hid);
+  await tick();
+  await tick();
+  assert.strictEqual(storeA.extraLists().length, 1, 'one פארם list, not two');
+  assert.deepStrictEqual(storeA.itemsOf(pharmA.id).map((i) => i.name).sort(), ['אקמול', 'אקמול', 'משחת שיניים'].sort(), 'D\'s items moved into the shared list');
 
   // --- Reopening the app on A: rejoins the saved household by itself ---
   const storageA2 = memoryStorage();

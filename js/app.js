@@ -15,6 +15,16 @@
     productQuery: '',
     editing: null, // product id being renamed
     confirmDelete: null, // receipt id waiting for a second tap
+    listId: (() => {
+      try {
+        return localStorage.getItem('kniyot.currentList') || null;
+      } catch (e) {
+        return null;
+      }
+    })(), // null = the main shopping list
+    creatingList: false,
+    editingList: false,
+    confirmDeleteList: false,
     pendingJoin: null, // household code from an invite link
     joinError: '',
     busy: false, // a create/join is in progress
@@ -166,8 +176,118 @@
       </div>`;
   }
 
+  function setList(id) {
+    ui.listId = id || null;
+    ui.expanded = null;
+    ui.editingList = false;
+    ui.confirmDeleteList = false;
+    try {
+      if (ui.listId) localStorage.setItem('kniyot.currentList', ui.listId);
+      else localStorage.removeItem('kniyot.currentList');
+    } catch (e) {
+      /* storage blocked: fine, just not remembered */
+    }
+    render();
+  }
+
+  /** The row of lists at the top: the main shopping list, extra lists, and "+". */
+  function listsBarHtml() {
+    const pill = (id, name, count) => `
+      <button class="list-pill${(ui.listId || '') === (id || '') ? ' active' : ''}" data-list="${id || ''}" aria-pressed="${(ui.listId || '') === (id || '')}">
+        ${esc(name)}${count ? `<span class="pill-count">${count}</span>` : ''}
+      </button>`;
+    const openCount = (id) => store.itemsOf(id).filter((i) => !i.checked).length;
+    return `
+      <nav class="lists-bar" aria-label="רשימות">
+        ${pill(null, 'קניות', openCount(null))}
+        ${store.extraLists().map((l) => pill(l.id, l.name, openCount(l.id))).join('')}
+        <button class="list-pill add" data-act="new-list" aria-label="רשימה חדשה">+ רשימה</button>
+      </nav>
+      ${
+        ui.creatingList
+          ? `<form class="new-list" id="newListForm">
+               <label for="newListInput">שם הרשימה</label>
+               <div class="rename-row">
+                 <input id="newListInput" placeholder="למשל פארם, בית מרקחת, חומרי בניין" autocomplete="off" enterkeyhint="done">
+                 <button class="btn small" type="submit">יצירה</button>
+                 <button class="link" type="button" data-act="cancel-new-list">ביטול</button>
+               </div>
+               <p class="hint">רשימה פשוטה: מוסיפים פריטים ומסמנים. בלי מחירים ומחלקות.</p>
+             </form>`
+          : ''
+      }`;
+  }
+
+  /** An extra list: items, check off, done section. No prices or sections. */
+  function renderSimpleList(list) {
+    const items = store.itemsOf(list.id);
+    const open = items.filter((i) => !i.checked);
+    const done = items.filter((i) => i.checked);
+    const row = (item, isLast) => `
+      <li class="item${item.checked ? ' done' : ''}${isLast ? ' last' : ''}" data-id="${item.id}">
+        <div class="row">
+          <button class="check" data-act="toggle" aria-label="${item.checked ? 'ביטול סימון' : 'סימון'} ${esc(item.name)}" aria-pressed="${item.checked}">${ICON_CHECK}</button>
+          <button class="name" data-act="toggle">${esc(item.name)}</button>
+          <button class="remove" data-act="remove-item" aria-label="מחיקת ${esc(item.name)}">×</button>
+        </div>
+      </li>`;
+
+    const editHtml = ui.editingList
+      ? `<form class="panel list-edit" id="listEditForm">
+           <label for="listNameInput" class="field-label">שם הרשימה</label>
+           <div class="rename-row">
+             <input id="listNameInput" value="${esc(list.name)}" autocomplete="off">
+             <button class="btn small" type="submit">שמירה</button>
+           </div>
+           <div class="actions">
+             ${
+               ui.confirmDeleteList
+                 ? `<button class="btn danger small solid" type="button" data-act="delete-list">למחוק את "${esc(list.name)}" וכל הפריטים בה?</button>
+                    <button class="link" type="button" data-act="keep-list">לא</button>`
+                 : `<button class="btn danger small" type="button" data-act="ask-delete-list">מחיקת הרשימה</button>`
+             }
+             <button class="link" type="button" data-act="close-list-edit">סגירה</button>
+           </div>
+         </form>`
+      : '';
+
+    view.innerHTML = `
+      ${listsBarHtml()}
+      <div class="list-title">
+        <h2>${esc(list.name)}</h2>
+        <button class="link" data-act="edit-list" aria-expanded="${ui.editingList}">עריכת הרשימה</button>
+      </div>
+      ${editHtml}
+      <form class="add" id="addForm">
+        <label class="sr-only" for="addInput">פריט להוספה ל${esc(list.name)}</label>
+        <input id="addInput" placeholder="מה להוסיף ל${esc(list.name)}?" autocomplete="off" enterkeyhint="done">
+        <button class="add-btn" type="submit" aria-label="הוספה"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      </form>
+      ${open.length ? `<section class="aisle"><ul class="list">${open.map((it, i) => row(it, i === open.length - 1)).join('')}</ul></section>` : ''}
+      ${!items.length ? `<div class="empty"><strong>הרשימה ריקה</strong>מוסיפים פריט בשורה למעלה.</div>` : ''}
+      ${!open.length && done.length ? `<p class="all-done">הכול סומן.</p>` : ''}
+      ${
+        done.length
+          ? `<section class="aisle cart" aria-label="סומנו">
+               <h2 class="aisle-head tone-cart"><span>סומנו</span><span class="aisle-count">${done.length}</span></h2>
+               <ul class="list">${done.map((it, i) => row(it, i === done.length - 1)).join('')}</ul>
+             </section>
+             <div class="list-actions"><button class="link" data-act="clear">ניקוי מה שסומן</button></div>`
+          : ''
+      }
+    `;
+    document.body.classList.remove('has-bar');
+    document.getElementById('topMeta').textContent = open.length ? `${open.length} פריטים` : '';
+  }
+
   function renderList() {
-    const list = store.state.list;
+    const extra = ui.listId ? store.extraLists().find((l) => l.id === ui.listId) : null;
+    if (ui.listId && !extra) ui.listId = null; // the list was deleted (maybe by the family)
+    if (extra) {
+      renderSimpleList(extra);
+      return;
+    }
+    const list = store.itemsOf(null);
     const open = list.filter((i) => !i.checked);
     const done = list.filter((i) => i.checked);
     const suggestions = store.suggestions();
@@ -306,6 +426,7 @@
 
     view.innerHTML = `
       ${joinHtml}
+      ${listsBarHtml()}
       <form class="add" id="addForm">
         <label class="sr-only" for="addInput">מוצר להוספה</label>
         <input id="addInput" list="productNames" placeholder="מה צריך לקנות?" autocomplete="off" enterkeyhint="done">
@@ -660,7 +781,7 @@
     if (form.id === 'addForm') {
       const input = form.querySelector('input');
       const typed = input.value.trim();
-      const item = store.addToList(typed);
+      const item = store.addToList(typed, ui.listId);
       if (item) {
         // Phone keyboards can re-type a word that was still being composed after we
         // clear the box, so end the composition first (blur), then clear, and check again.
@@ -689,6 +810,25 @@
       if (diff <= -0.05) { cls = 'cheap'; txt = `זול ב־${Math.round(-diff * 100)}% מהרגיל`; }
       else if (diff >= 0.05) { cls = 'pricey'; txt = `יקר ב־${Math.round(diff * 100)}% מהרגיל`; }
       slot.innerHTML = `<span class="verdict ${cls}">${txt}</span>`;
+      return;
+    }
+
+    if (form.id === 'newListForm') {
+      const list = store.addList(form.querySelector('input').value);
+      if (list) {
+        ui.creatingList = false;
+        toast(`נוצרה הרשימה "${list.name}"`);
+        setList(list.id);
+        const input = document.getElementById('addInput');
+        if (input) input.focus();
+      }
+      return;
+    }
+
+    if (form.id === 'listEditForm' && ui.listId) {
+      store.renameList(ui.listId, form.querySelector('input').value);
+      ui.editingList = false;
+      render();
       return;
     }
 
@@ -823,7 +963,40 @@
       ui.allSuggestions = t.dataset.act === 'more-suggestions';
       render();
     } else if (t.dataset.act === 'clear') {
-      store.clearChecked();
+      store.clearChecked(ui.listId);
+      render();
+    } else if (t.dataset.list !== undefined && t.classList.contains('list-pill')) {
+      ui.creatingList = false;
+      setList(t.dataset.list);
+    } else if (t.dataset.act === 'new-list') {
+      ui.creatingList = !ui.creatingList;
+      render();
+      const input = document.getElementById('newListInput');
+      if (input) input.focus();
+    } else if (t.dataset.act === 'cancel-new-list') {
+      ui.creatingList = false;
+      render();
+    } else if (t.dataset.act === 'edit-list') {
+      ui.editingList = !ui.editingList;
+      ui.confirmDeleteList = false;
+      render();
+    } else if (t.dataset.act === 'close-list-edit') {
+      ui.editingList = false;
+      ui.confirmDeleteList = false;
+      render();
+    } else if (t.dataset.act === 'ask-delete-list') {
+      ui.confirmDeleteList = true;
+      render();
+    } else if (t.dataset.act === 'keep-list') {
+      ui.confirmDeleteList = false;
+      render();
+    } else if (t.dataset.act === 'delete-list' && ui.listId) {
+      const list = store.extraLists().find((l) => l.id === ui.listId);
+      store.deleteList(ui.listId);
+      toast(`הרשימה "${list ? list.name : ''}" נמחקה`);
+      setList(null);
+    } else if (t.dataset.act === 'remove-item' && li) {
+      store.removeItem(li.dataset.id);
       render();
     } else if (t.dataset.suggest) {
       const p = store.state.products[t.dataset.suggest];

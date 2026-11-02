@@ -11,6 +11,7 @@
  *   households/{hid}/list/{itemId}    a shopping-list item
  *   households/{hid}/receipts/{id}    receipt details + its purchase lines
  *   households/{hid}/trips/{id}       a finished shopping trip
+ *   households/{hid}/lists/{id}       an extra simple list (its items are in list/, tagged listId)
  *   households/{hid}/meta/catalog     { products, codeMap, dismissed }
  *
  * The sync logic talks to an "adapter", so it can be tested without Firebase
@@ -31,7 +32,7 @@
 
   const HOUSEHOLD_KEY = 'kniyot.household';
   const DIRTY_KEY = 'kniyot.dirty';
-  const COLLECTIONS = ['list', 'receipts', 'trips'];
+  const COLLECTIONS = ['list', 'receipts', 'trips', 'lists'];
   const DELETE = { __delete: true };
 
   const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
@@ -69,12 +70,15 @@
       trips[t.id] = clone(t);
     });
 
+    const lists = {};
+    for (const l of state.lists || []) lists[l.id] = clone(l);
+
     const catalog = {
       products: clone(state.products || {}),
       codeMap: clone(state.codeMap || {}),
       dismissed: clone(state.dismissed || {}),
     };
-    return { list, receipts, trips, catalog };
+    return { list, receipts, trips, lists, catalog };
   }
 
   /** Put one part that came from the cloud back into the app state. */
@@ -92,6 +96,8 @@
       for (const r of docs) for (const p of r.purchases || []) state.purchases.push(Object.assign({ receiptId: r.id }, clone(p)));
     } else if (name === 'trips') {
       state.trips = Object.values(data || {}).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    } else if (name === 'lists') {
+      state.lists = Object.values(data || {}).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     } else if (name === 'catalog') {
       const c = data || emptyCatalog();
       state.products = clone(c.products || {});
@@ -139,6 +145,7 @@
       list: clone(remote.list || {}),
       receipts: clone(remote.receipts || {}),
       trips: clone(remote.trips || {}),
+      lists: clone(remote.lists || {}),
       catalog: clone(remote.catalog || emptyCatalog()),
     };
     const cat = merged.catalog;
@@ -173,11 +180,29 @@
       if (!merged.receipts[r.id] && !haveReceipts.has(receiptKey(r))) merged.receipts[r.id] = clone(r);
     }
 
-    const openNames = new Set(Object.values(merged.list).filter((i) => !i.checked).map((i) => norm(i.name)));
+    // Extra lists with the same name become one ("פארם" on both phones).
+    const listIdByName = {};
+    for (const l of Object.values(merged.lists)) listIdByName[norm(l.name)] = l.id;
+    const listRemap = {};
+    for (const l of Object.values(local.lists || {})) {
+      const existing = listIdByName[norm(l.name)];
+      if (existing) listRemap[l.id] = existing;
+      else {
+        merged.lists[l.id] = clone(l);
+        listIdByName[norm(l.name)] = l.id;
+        listRemap[l.id] = l.id;
+      }
+    }
+
+    // Items: skip one that's already open on the same list.
+    const openKey = (i) => `${i.listId || ''}|${norm(i.name)}`;
+    const open = new Set(Object.values(merged.list).filter((i) => !i.checked).map(openKey));
     for (const item of Object.values(local.list)) {
       if (merged.list[item.id]) continue;
-      if (!item.checked && openNames.has(norm(item.name))) continue;
-      merged.list[item.id] = clone(item);
+      const copy = clone(item);
+      if (copy.listId) copy.listId = listRemap[copy.listId] || copy.listId;
+      if (!copy.checked && open.has(openKey(copy))) continue;
+      merged.list[copy.id] = copy;
     }
 
     for (const t of Object.values(local.trips)) if (!merged.trips[t.id]) merged.trips[t.id] = clone(t);
@@ -268,7 +293,7 @@
       await this.adapter.createHousehold(hid, { members: [this.uid], createdAt: new Date().toISOString() });
       this.set(HOUSEHOLD_KEY, hid);
       this.hid = hid;
-      this.synced = { list: {}, receipts: {}, trips: {}, catalog: null };
+      this.synced = { list: {}, receipts: {}, trips: {}, lists: {}, catalog: null };
       await this.pushNow();
       await this.attach(hid, { merge: false });
       return hid;

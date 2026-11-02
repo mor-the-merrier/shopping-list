@@ -1,7 +1,7 @@
 // Service worker: lets the app open without internet (e.g. inside the supermarket).
 // Bump the version when you change files, so phones pick up the new code.
-const CACHE = 'kniyot-v14';
-const VERSION = '14'; // keep in sync with the ?v= numbers in index.html
+const CACHE = 'kniyot-v15';
+const VERSION = '15'; // keep in sync with the ?v= numbers in index.html
 const APP_FILES = [
   './',
   'index.html',

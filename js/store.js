@@ -7,7 +7,8 @@
  *   purchases: [{ receiptId, key, rawName, unitPrice, qty, total, discount, weighted }]
  *   products:  { [productId]: { id, name } }
  *   codeMap:   { [key]: productId }     key = barcode, or "chain:code" for short in-store codes
- *   list:      [{ id, name, checked, addedAt }]
+ *   list:      [{ id, name, checked, addedAt, listId? }]   items of every list (no listId = main list)
+ *   lists:     [{ id, name, createdAt }]   extra simple lists (pharmacy, ...)
  *   dismissed: { [productId]: "YYYY-MM-DD" }   suggestions hidden until that date
  *   trips:     [{ date, estimate, actual, items }]   finished shopping trips
  */
@@ -26,7 +27,7 @@
   const round2 = (n) => Math.round(n * 100) / 100;
 
   function emptyState() {
-    return { receipts: [], purchases: [], products: {}, codeMap: {}, list: [], dismissed: {}, trips: [] };
+    return { receipts: [], purchases: [], products: {}, codeMap: {}, list: [], dismissed: {}, trips: [], lists: [] };
   }
 
   function median(nums) {
@@ -193,7 +194,7 @@
     listBySection() {
       const { ORDER, BY_ID } = Categories();
       const groups = new Map();
-      for (const item of this.state.list) {
+      for (const item of this.itemsOf(null)) {
         if (item.checked) continue; // checked items are shown in the cart
         const id = this.categoryOfItem(item);
         if (!groups.has(id)) groups.set(id, []);
@@ -324,13 +325,54 @@
       };
     }
 
-    // ---------- shopping list ----------
-    addToList(name) {
+    // ---------- lists ----------
+    // The main shopping list (items with no listId) has prices, sections and
+    // suggestions. Extra lists ("פארם") are simple: items checked off, nothing else.
+
+    /** Items of one list: null = the main shopping list. */
+    itemsOf(listId = null) {
+      return this.state.list.filter((i) => (i.listId || null) === (listId || null));
+    }
+
+    /** The extra lists, oldest first. */
+    extraLists() {
+      return (this.state.lists || []).slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    }
+
+    addList(name) {
+      const clean = String(name || '').trim();
+      if (!clean) return null;
+      this.state.lists = this.state.lists || [];
+      const dup = this.state.lists.find((l) => norm(l.name) === norm(clean));
+      if (dup) return dup;
+      const list = { id: uid('L'), name: clean, createdAt: new Date().toISOString() };
+      this.state.lists.push(list);
+      this.save();
+      return list;
+    }
+
+    renameList(id, name) {
+      const list = (this.state.lists || []).find((l) => l.id === id);
+      if (!list || !String(name).trim()) return;
+      list.name = String(name).trim();
+      this.save();
+    }
+
+    /** Delete a list and its items. */
+    deleteList(id) {
+      this.state.lists = (this.state.lists || []).filter((l) => l.id !== id);
+      this.state.list = this.state.list.filter((i) => i.listId !== id);
+      this.save();
+    }
+
+    // ---------- list items ----------
+    addToList(name, listId = null) {
       const clean = String(name || '').trim(); // exactly what was typed
       if (!clean) return null;
-      const dup = this.state.list.find((i) => !i.checked && norm(i.name) === norm(clean));
+      const dup = this.itemsOf(listId).find((i) => !i.checked && norm(i.name) === norm(clean));
       if (dup) return dup;
       const item = { id: uid('l'), name: clean, checked: false, addedAt: new Date().toISOString() };
+      if (listId) item.listId = listId;
       this.state.list.push(item);
       this.save();
       return item;
@@ -347,8 +389,8 @@
       this.save();
     }
 
-    clearChecked() {
-      this.state.list = this.state.list.filter((i) => !i.checked);
+    clearChecked(listId = null) {
+      this.state.list = this.state.list.filter((i) => !(i.checked && (i.listId || null) === (listId || null)));
       this.save();
     }
 
@@ -358,7 +400,7 @@
      */
     estimate(now) {
       const sum = { all: 0, cart: 0, unpriced: 0, items: 0 };
-      for (const item of this.state.list) {
+      for (const item of this.itemsOf(null)) {
         sum.items++;
         const p = this.matchProduct(item.name);
         const s = p ? this.stats(p.id, now) : null;
@@ -377,7 +419,7 @@
     /** Close a shopping trip: remember estimate vs. actual, clear the cart. */
     finishTrip(actual, now) {
       const est = this.estimate(now);
-      const cartCount = this.state.list.filter((i) => i.checked).length;
+      const cartCount = this.itemsOf(null).filter((i) => i.checked).length;
       this.state.trips = this.state.trips || [];
       this.state.trips.push({
         id: uid('t'),
@@ -386,7 +428,7 @@
         actual: actual != null && !isNaN(actual) ? round2(actual) : null,
         items: cartCount,
       });
-      this.state.list = this.state.list.filter((i) => !i.checked);
+      this.state.list = this.state.list.filter((i) => !(i.checked && !i.listId)); // main list only
       this.save();
       return this.state.trips[this.state.trips.length - 1];
     }
@@ -400,7 +442,7 @@
     suggestions(now) {
       const today = todayISO(now);
       const onList = new Set();
-      for (const i of this.state.list.filter((x) => !x.checked)) {
+      for (const i of this.itemsOf(null).filter((x) => !x.checked)) {
         const m = this.matchProduct(i.name);
         if (m) onList.add(m.id);
       }

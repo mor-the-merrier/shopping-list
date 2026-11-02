@@ -108,3 +108,32 @@ store.deleteReceipt(first.receipt.id);
 assert.strictEqual(store.stats(eggs.id, '2026-10-26T10:00:00').timesBought, 1);
 
 console.log('OK: store, stats, suggestions');
+
+// ---------- extra simple lists ----------
+{
+  const s2 = new Store();
+  s2.addToList('חלב');
+  const pharm = s2.addList('פארם');
+  assert.strictEqual(s2.addList(' פארם ').id, pharm.id, 'same name = same list');
+  s2.addToList('אקמול', pharm.id);
+  s2.addToList('חלב', pharm.id); // same name on another list is a separate item
+  assert.strictEqual(s2.itemsOf(null).length, 1, 'main list untouched');
+  assert.strictEqual(s2.itemsOf(pharm.id).length, 2);
+  assert.strictEqual(s2.estimate().items, 1, 'estimate counts the main list only');
+  assert.ok(s2.listBySection().every((g) => g.items.every((i) => !i.listId)), 'sections show the main list only');
+
+  const akamol = s2.itemsOf(pharm.id).find((i) => i.name === 'אקמול');
+  s2.toggleItem(akamol.id);
+  s2.toggleItem(s2.itemsOf(null)[0].id);
+  s2.finishTrip(10);
+  assert.ok(s2.itemsOf(pharm.id).find((i) => i.id === akamol.id), 'finishing the shopping trip keeps other lists');
+  s2.clearChecked(pharm.id);
+  assert.deepStrictEqual(s2.itemsOf(pharm.id).map((i) => i.name), ['חלב'], 'clear done on the pharmacy list only');
+
+  s2.renameList(pharm.id, 'בית מרקחת');
+  assert.strictEqual(s2.extraLists()[0].name, 'בית מרקחת');
+  s2.deleteList(pharm.id);
+  assert.strictEqual(s2.extraLists().length, 0);
+  assert.strictEqual(s2.state.list.filter((i) => i.listId).length, 0, 'deleting a list removes its items');
+  console.log('OK: extra lists');
+}

@@ -7,6 +7,7 @@ A family shopping list (Hebrew interface) that learns from your digital supermar
 - **Estimated total** for the list, and a place to record what you actually paid when you finish shopping.
 - **Shelf price check.** Tap an item, type the price on the shelf, and see whether it's cheaper, normal or more expensive than usual.
 - **"Probably running out" suggestions,** based on how often you buy each product.
+- **More lists when you need them** (pharmacy, hardware store…): simple lists with a done section, alongside the main shopping list. No prices or sections on those.
 - **One list for the whole family,** synced in real time, including offline use inside the store.
 
 No AI and no running costs. All the calculations happen in the browser, and sharing runs on Firebase's free plan.
@@ -59,6 +60,7 @@ households/{householdId}            { members: [uid], createdAt }
 households/{householdId}/list       shopping-list items
 households/{householdId}/receipts   receipt details and their purchase lines
 households/{householdId}/trips      finished shopping trips (estimate vs. actual)
+households/{householdId}/lists      extra simple lists (their items are in list/, tagged with listId)
 households/{householdId}/meta/catalog   { products, codeMap, dismissed }
 ```
 
