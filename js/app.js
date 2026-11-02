@@ -325,7 +325,11 @@
     let pendingHtml = '';
     if (ui.pending) {
       const { parsed, duplicate, text } = ui.pending;
-      const warnings = parsed.warnings.map((w) => `<p class="notice">${esc(w)}</p>`).join('');
+      // The date field below handles a missing date, so don't repeat it as a warning.
+      const warnings = parsed.warnings
+        .filter((w) => !/תאריך/.test(w))
+        .map((w) => `<p class="notice">${esc(w)}</p>`)
+        .join('');
       if (!parsed.items.length) {
         pendingHtml = `
           <section class="panel">
@@ -340,11 +344,22 @@
       } else {
         pendingHtml = `
           <section class="panel">
-            <h3>${esc(parsed.chain.name)}, ${dateHe(parsed.date)}</h3>
+            <h3>${esc(parsed.chain.name)}${parsed.date ? `, ${dateHe(parsed.date)}` : ''}</h3>
             <p>${parsed.items.length} שורות, סה״כ ₪${money(parsed.total)}</p>
             ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : warnings || '<p class="notice ok">כל השורות זוהו והסכום תואם לקבלה.</p>'}
+            ${
+              duplicate
+                ? ''
+                : `<div class="receipt-date${parsed.date ? '' : ' missing'}">
+                     <label for="receiptDate">${parsed.date ? 'תאריך הקנייה' : 'לא מצאתי תאריך בקבלה. מתי הייתה הקנייה?'}</label>
+                     <div class="rename-row">
+                       <input type="date" id="receiptDate" value="${esc(parsed.date || '')}" max="${window.KniyotStore.todayISO()}">
+                       ${parsed.date ? '' : '<button class="btn secondary small" type="button" data-act="date-today">היום</button>'}
+                     </div>
+                   </div>`
+            }
             <div class="actions">
-              ${duplicate ? '' : '<button class="btn" data-act="save-receipt">שמירת הקבלה</button>'}
+              ${duplicate ? '' : `<button class="btn" data-act="save-receipt" ${parsed.date ? '' : 'disabled'}>שמירת הקבלה</button>`}
               <button class="btn secondary" data-act="cancel">ביטול</button>
             </div>
           </section>`;
@@ -808,7 +823,13 @@
     } else if (t.dataset.act === 'parse-paste') {
       const text = document.getElementById('pasteInput').value;
       if (text.trim()) handleParsed(text);
+    } else if (t.dataset.act === 'date-today' && ui.pending) {
+      setReceiptDate(window.KniyotStore.todayISO());
     } else if (t.dataset.act === 'save-receipt' && ui.pending) {
+      if (!ui.pending.parsed.date) {
+        toast('צריך לבחור את תאריך הקנייה');
+        return;
+      }
       const { unknown } = store.importReceipt(ui.pending.parsed);
       ui.pending = null;
       ui.unknown = unknown;
@@ -843,7 +864,20 @@
     }
   });
 
+  /** The user picked or fixed the receipt's date. */
+  function setReceiptDate(iso) {
+    if (!ui.pending || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+    ui.pending.parsed.date = iso;
+    ui.pending.parsed.warnings = ui.pending.parsed.warnings.filter((w) => !/תאריך/.test(w));
+    ui.pending.duplicate = store.isDuplicate(ui.pending.parsed);
+    render();
+  }
+
   view.addEventListener('change', async (e) => {
+    if (e.target.id === 'receiptDate') {
+      setReceiptDate(e.target.value);
+      return;
+    }
     if (e.target.dataset && e.target.dataset.categoryFor) {
       store.setCategory(e.target.dataset.categoryFor, e.target.value);
       toast(`הועבר למחלקה: ${window.KniyotCategories.BY_ID[e.target.value].name}`);

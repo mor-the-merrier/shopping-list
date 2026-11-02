@@ -1,6 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#5b3fd0"/>
-  <path d="M120 196 L180 136 H392 V376 H180 L120 316 Z" fill="#ffd43b"/>
-  <circle cx="176" cy="256" r="18" fill="#5b3fd0"/>
-  <text x="300" y="300" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="130" fill="#2a2200">₪</text>
+  <!-- The list, grouped by section (green, blue, yellow), with a purple check mark. -->
+  <rect width="512" height="512" rx="112" fill="#f6f4fb"/>
+  <rect x="88" y="108" width="336" height="296" rx="40" fill="#ffffff"/>
+  <rect x="108" y="128" width="296" height="76" rx="22" fill="#e6f4ea"/>
+  <rect x="108" y="218" width="296" height="76" rx="22" fill="#e5eefb"/>
+  <rect x="108" y="308" width="296" height="76" rx="22" fill="#fff4cc"/>
+  <circle cx="364" cy="166" r="17" fill="#ffffff" stroke="#1e5631" stroke-width="6"/>
+  <circle cx="364" cy="256" r="17" fill="#ffffff" stroke="#1d3f73" stroke-width="6"/>
+  <circle cx="364" cy="346" r="17" fill="#ffffff" stroke="#634c00" stroke-width="6"/>
+  <rect x="196" y="158" width="140" height="16" rx="8" fill="#1e5631" opacity="0.55"/>
+  <rect x="226" y="248" width="110" height="16" rx="8" fill="#1d3f73" opacity="0.55"/>
+  <rect x="246" y="338" width="90" height="16" rx="8" fill="#634c00" opacity="0.55"/>
+  <circle cx="150" cy="370" r="70" fill="#5b3fd0" stroke="#f6f4fb" stroke-width="14"/>
+  <path d="M120 370l22 22 40-44" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

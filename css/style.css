@@ -623,3 +623,21 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
 .aisle.cart { border: 1.5px dashed var(--check); }
 
 .all-done { text-align: center; color: var(--muted); margin: 8px 0 14px; }
+
+/* ---------- receipt date ---------- */
+.receipt-date { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 4px; }
+
+.receipt-date label { font-size: 14px; color: var(--muted); }
+
+.receipt-date.missing { background: var(--warn-soft); border-radius: 12px; padding: 10px 12px; }
+
+.receipt-date.missing label { color: var(--ink); font-weight: 700; }
+
+.receipt-date input[type='date'] {
+  flex: 1;
+  min-width: 0;
+  border: 1.5px solid var(--check);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+}
