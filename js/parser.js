@@ -48,11 +48,14 @@
       .replace(/\r\n?/g, '\n')
       .replace(/[‎‏‪-‮⁦-⁩]/g, '') // bidi control chars
       .replace(/ /g, ' ')
-      .replace(/₪\s+/g, '₪')
-      .replace(/ILS\s+/g, 'ILS');
+      // "ILS 6.6" → "ILS6.6" and "6.6 ILS" → "6.6ILS". Spaces only: never join lines.
+      .replace(/(ILS|₪)[ \t]+(?=-?\d)/g, '$1')
+      .replace(/(\d)[ \t]+(ILS|₪)(?![ \t]*-?\d)/g, '$1$2');
     if (needsHebrewFix(t)) {
       t = t.split('\n').map(visualToLogical).join('\n');
     }
+    // Some PDFs mirror parentheses in Hebrew text: ")צימקאו(" → "(צימקאו)".
+    t = t.replace(/\)([^()\n]*)\(/g, '($1)');
     return t;
   }
 
@@ -70,18 +73,23 @@
 
   function parseHeader(text) {
     const out = {};
+    // "20/10/2026 11:47:45" or "11:47:45 20/10/2026"
     const date = text.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
     if (date) {
       const [, d, m, y, time] = date;
       out.date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-      out.time = time || '';
+      const before = text.slice(Math.max(0, date.index - 12), date.index).match(/(\d{1,2}:\d{2}(?::\d{2})?)\s*$/);
+      out.time = time || (before ? before[1] : '');
     }
     const invoice = text.match(/חשבונית(?:\s*מס)?\s*:\s*(\d+)/);
     if (invoice) out.invoice = invoice[1];
     const branch = text.match(/מספר סניף\s*:\s*(\d+)/);
     if (branch) out.branch = branch[1];
     // 'סה"כ:' exactly (not 'סה"כ ללא מע"מ')
-    const total = text.match(/סה["״]?כ\s*:\s*(?:ILS|₪)?\s*(\d+(?:\.\d+)?)/);
+    const total =
+      text.match(/סה["״]?כ\s*:\s*(?:ILS|₪)?\s*(\d+(?:\.\d+)?)/) ||
+      // reversed: '595.34ILS :סה"כ'
+      text.match(/(\d+(?:\.\d+)?)\s*(?:ILS|₪)?\s*:\s*סה["״]?כ[ \t]*(?:\n|$)/);
     if (total) out.total = parseFloat(total[1]);
     return out;
   }

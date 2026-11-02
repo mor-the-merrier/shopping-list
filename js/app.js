@@ -293,8 +293,11 @@
           <section class="panel">
             <h3>לא הצלחתי לקרוא את הקבלה</h3>
             <p>הטקסט שחולץ מהקובץ מופיע למטה. אם זו קבלה מרשת אחרת, אפשר להעתיק אותו ולשלוח כדי להוסיף לה תמיכה.</p>
-            <details><summary>הטקסט שחולץ</summary><pre class="debug">${esc(text)}</pre></details>
-            <div class="actions"><button class="btn secondary" data-act="cancel">סגירה</button></div>
+            <details><summary>הטקסט שחולץ</summary><pre class="debug" id="extractedText">${esc(text)}</pre></details>
+            <div class="actions">
+              <button class="btn small" data-act="copy-extracted">העתקת הטקסט</button>
+              <button class="btn secondary small" data-act="cancel">סגירה</button>
+            </div>
           </section>`;
       } else {
         pendingHtml = `
@@ -370,8 +373,19 @@
     document.getElementById('topMeta').textContent = receipts.length ? `${receipts.length} קבלות` : '';
   }
 
-  function handleParsed(text) {
-    const parsed = window.ReceiptParser.parse(text);
+  /**
+   * Parse one text, or several readings of the same PDF, and keep the one
+   * that finds the most lines (ties: the one whose sum matches the total).
+   */
+  function handleParsed(textOrTexts) {
+    const texts = Array.isArray(textOrTexts) ? textOrTexts : [textOrTexts];
+    let best = null;
+    for (const text of texts) {
+      const parsed = window.ReceiptParser.parse(text);
+      const score = parsed.items.length * 10 - parsed.warnings.length;
+      if (!best || score > best.score) best = { parsed, text, score };
+    }
+    const { parsed, text } = best;
     ui.pending = { parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text };
     render();
   }
@@ -638,6 +652,17 @@
           ui.busy = false;
           render();
         });
+    } else if (t.dataset.act === 'copy-extracted' && ui.pending) {
+      (navigator.clipboard ? navigator.clipboard.writeText(ui.pending.text) : Promise.reject())
+        .then(() => toast('הטקסט הועתק'))
+        .catch(() => {
+          const pre = document.getElementById('extractedText');
+          if (pre) {
+            pre.closest('details').open = true;
+            window.getSelection().selectAllChildren(pre);
+          }
+          toast('הטקסט מסומן. אפשר להעתיק אותו');
+        });
     } else if (t.dataset.act === 'join-pending') {
       joinWith(ui.pendingJoin);
     } else if (t.dataset.act === 'dismiss-join') {
@@ -722,8 +747,8 @@
       const file = e.target.files[0];
       toast('קורא את הקבלה…');
       try {
-        const text = await window.PdfText.pdfToText(file);
-        handleParsed(text);
+        const readings = await window.PdfText.pdfToTexts(file);
+        handleParsed(readings.map((r) => r.text));
       } catch (err) {
         console.error(err);
         toast(err.message || 'לא הצלחתי לפתוח את הקובץ');

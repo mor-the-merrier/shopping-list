@@ -42,4 +42,20 @@ assert.strictEqual(rev.unitPrice, 6.9);
 assert.strictEqual(visualToLogical('רג 80 תיקש'), 'שקית 80 גר');
 assert.strictEqual(visualToLogical('הבלח 5%'), '5% חלבה');
 
-console.log(`OK: ${r.items.length} items, sum ₪${r.itemsSum} = total ₪${r.total}`);
+// The same receipt as pdf.js extracts it in the browser: currency after the
+// amount at the end of each line, total written backwards, time before the
+// date, mirrored parentheses. (Regression: "ILS\s+" used to swallow line breaks.)
+const pdfStyle = text
+  .replace(/ILS(-?\d+(?:\.\d+)?)/g, '$1ILS')
+  .replace(/סה"כ: (\d+(?:\.\d+)?)ILS/, '$1ILS :סה"כ')
+  .replace('13/10/2026 18:20:05', '18:20:05 13/10/2026')
+  .replace('יוגורט טבעי 3%', 'יוגורט טבעי )3%(');
+const p = parse(pdfStyle);
+assert.strictEqual(p.items.length, 20, 'pdf-style: all lines parsed');
+assert.strictEqual(p.total, 196.58, 'pdf-style: reversed total found');
+assert.deepStrictEqual(p.warnings, [], 'pdf-style: no warnings: ' + p.warnings.join(' | '));
+assert.strictEqual(p.time, '18:20:05');
+assert.strictEqual(p.items.find((i) => i.code === '7290000000062').name, 'יוגורט טבעי (3%)');
+assert.strictEqual(p.items.find((i) => i.code === '7290000000123').discount, -10);
+
+console.log(`OK: ${r.items.length} items, sum ₪${r.itemsSum} = total ₪${r.total} (also in pdf.js layout)`);
