@@ -513,10 +513,14 @@
   // ---------- render ----------
   function render() {
     // Keep what the user is typing when a change from the family re-renders the screen.
+    // Text fields only: a file picker's value can't be set from code.
     const active = document.activeElement;
-    const keep = active && active.id && view.contains(active) && /^(INPUT|TEXTAREA)$/.test(active.tagName)
-      ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
-      : null;
+    const isTextField =
+      active &&
+      active.id &&
+      view.contains(active) &&
+      (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && /^(text|search|url|tel|email|number|)$/.test(active.type || '')));
+    const keep = isTextField ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd } : null;
 
     refreshDatalist();
     if (ui.tab === 'list') renderList();
@@ -527,9 +531,9 @@
     if (keep) {
       const el = document.getElementById(keep.id);
       if (el) {
-        el.value = keep.value;
-        el.focus();
         try {
+          el.value = keep.value;
+          el.focus();
           el.setSelectionRange(keep.start, keep.end);
         } catch (e) {
           /* some input types have no selection */
