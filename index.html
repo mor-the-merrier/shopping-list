@@ -6,7 +6,7 @@
   <title>קניות</title>
   <meta name="description" content="רשימת קניות שלומדת מהקבלות שלך כמה דברים עולים ומתי צריך לקנות שוב.">
   <meta name="theme-color" content="#f6f4fb">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="only light">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
   <div class="app">
@@ -50,14 +50,14 @@
 
   <datalist id="productNames"></datalist>
 
-  <script src="js/parser.js"></script>
-  <script src="js/categories.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/pdf.js"></script>
-  <script src="js/shufersal.js"></script>
-  <script src="js/ocr.js"></script>
-  <script src="js/cloud.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/parser.js?v=12"></script>
+  <script src="js/categories.js?v=12"></script>
+  <script src="js/store.js?v=12"></script>
+  <script src="js/pdf.js?v=12"></script>
+  <script src="js/shufersal.js?v=12"></script>
+  <script src="js/ocr.js?v=12"></script>
+  <script src="js/cloud.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1,18 +1,19 @@
 // Service worker: lets the app open without internet (e.g. inside the supermarket).
 // Bump the version when you change files, so phones pick up the new code.
-const CACHE = 'kniyot-v10';
+const CACHE = 'kniyot-v12';
+const VERSION = '12'; // keep in sync with the ?v= numbers in index.html
 const APP_FILES = [
   './',
   'index.html',
-  'css/style.css',
-  'js/parser.js',
-  'js/categories.js',
-  'js/store.js',
-  'js/pdf.js',
-  'js/shufersal.js',
-  'js/ocr.js',
-  'js/cloud.js',
-  'js/app.js',
+  'css/style.css?v=' + VERSION,
+  'js/parser.js?v=' + VERSION,
+  'js/categories.js?v=' + VERSION,
+  'js/store.js?v=' + VERSION,
+  'js/pdf.js?v=' + VERSION,
+  'js/shufersal.js?v=' + VERSION,
+  'js/ocr.js?v=' + VERSION,
+  'js/cloud.js?v=' + VERSION,
+  'js/app.js?v=' + VERSION,
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -34,8 +35,11 @@ self.addEventListener('activate', (e) => {
 // Network first, falling back to the cache when offline.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Same-site files: always ask the server whether there's a newer version
+  // (GitHub Pages otherwise lets phones keep old files for 10 minutes).
+  const sameSite = new URL(e.request.url).origin === location.origin;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, sameSite ? { cache: 'no-cache' } : undefined)
       .then((res) => {
         if (res.ok || res.type === 'opaque') {
           const copy = res.clone();
@@ -43,6 +47,14 @@ self.addEventListener('fetch', (e) => {
         }
         return res;
       })
-      .catch(() => caches.match(e.request).then((hit) => hit || caches.match('./')))
+      .catch(() =>
+        caches.match(e.request).then((hit) => {
+          if (hit) return hit;
+          // Offline: opening the app falls back to the saved page; any other file
+          // (a script, a font) just fails, rather than getting the page in its place.
+          if (e.request.mode === 'navigate') return caches.match('./');
+          return Response.error();
+        })
+      )
   );
 });

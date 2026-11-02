@@ -36,7 +36,8 @@
 
   --radius: 18px;
   --font: 'Assistant', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-  color-scheme: light;
+  /* "only light": also stops Chrome / Samsung Internet from darkening the page */
+  color-scheme: only light;
 }
 
 /* One light look on every phone, also when the phone is set to dark mode. */

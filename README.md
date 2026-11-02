@@ -120,4 +120,4 @@ node test/shufersal.test.js  # Shufersal layout from made-up OCR words
 
 - The Firebase settings in `js/cloud.js` identify the project and aren't a secret. The security rules are what protect the data.
 - Firebase's free plan doesn't require a credit card. If a quota is reached, requests are refused rather than billed.
-- After changing the code, bump the version in the `const CACHE` line of `sw.js` so phones load the new version.
+- After changing the code, bump `VERSION` in `sw.js` and the matching `?v=` numbers in `index.html`, so phones load the new files.
