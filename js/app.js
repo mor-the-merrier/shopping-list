@@ -154,6 +154,18 @@
     return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SECTION_ICONS[id] || SECTION_ICONS.other}</svg>`;
   }
 
+  /** "מחלקה" picker inside an item's details on the list. */
+  function sectionPicker(item) {
+    const current = store.categoryOfItem(item);
+    return `
+      <div class="section-pick">
+        <label for="sec-${item.id}">מחלקה</label>
+        <select id="sec-${item.id}" class="cat-select" data-item-category="${item.id}">
+          ${window.KniyotCategories.CATEGORIES.map((c) => `<option value="${c.id}" ${c.id === current ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
   function renderList() {
     const list = store.state.list;
     const open = list.filter((i) => !i.checked);
@@ -184,9 +196,10 @@
                 <input id="cmp-${item.id}" inputmode="decimal" placeholder="₪" autocomplete="off">
                 <span class="verdict-slot" aria-live="polite"></span>
               </form>
+              ${sectionPicker(item)}
             </div>`;
         } else {
-          detail = `<div class="detail">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</div>`;
+          detail = `<div class="detail"><p class="detail-note">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</p>${sectionPicker(item)}</div>`;
         }
       }
       const price = stats
@@ -272,7 +285,7 @@
         : `<div class="cartbar" role="region" aria-label="סיכום">
              <div class="bar-text">
                <span class="bar-label">משוער · בעגלה ${done.length}/${list.length}${unpriced}</span>
-               <span class="bar-value"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(est.all)}</bdi></span>
+               <span class="bar-value">${est.all > 0 ? `<bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(est.all)}</bdi>` : '—'}</span>
              </div>
              <button class="bar-btn" data-act="finish" ${done.length ? '' : 'disabled'} title="${done.length ? '' : 'מסמנים מוצרים בעגלה, ואז מסיימים'}">סיום קנייה</button>
            </div>`;
@@ -876,6 +889,18 @@
   view.addEventListener('change', async (e) => {
     if (e.target.id === 'receiptDate') {
       setReceiptDate(e.target.value);
+      return;
+    }
+    if (e.target.dataset && e.target.dataset.itemCategory) {
+      const item = store.state.list.find((i) => i.id === e.target.dataset.itemCategory);
+      if (item) {
+        // No product yet (e.g. "מלח"): create one by this name, so the choice is
+        // remembered next time and shared with the family.
+        const product = store.matchProduct(item.name) || store.getOrCreateProduct(item.name);
+        store.setCategory(product.id, e.target.value);
+        toast(`"${item.name}" עבר למחלקה: ${window.KniyotCategories.BY_ID[e.target.value].name}`);
+        render();
+      }
       return;
     }
     if (e.target.dataset && e.target.dataset.categoryFor) {
