@@ -1,90 +1,113 @@
-# קניות
+# Shopping List
 
-רשימת קניות משפחתית שלומדת מהקבלות הדיגיטליות שלך:
+A family shopping list (Hebrew interface) that learns from your digital supermarket receipts:
 
-- **מחיר רגיל ליד כל מוצר.** מעלים קבלה, והאפליקציה זוכרת כמה שילמת. כשמוסיפים "חלב" לרשימה, מופיע לידו המחיר שבדרך כלל משלמים עליו.
-- **סכום משוער לרשימה**, ומקום לרשום כמה שולם בפועל בסוף הקנייה.
-- **השוואה במדף.** לוחצים על מוצר ברשימה, מקלידים את המחיר שעל המדף, ומקבלים "זול / רגיל / יקר מהרגיל".
-- **הצעות למה שנגמר.** לפי התדירות שבה קונים כל מוצר, האפליקציה מציעה להוסיף אותו לרשימה כשמתקרב הזמן.
-- **רשימה משותפת למשפחה.** כולם רואים את אותה רשימה, קבלות ומחירים, בזמן אמת.
+- **Usual price next to every item.** Upload a receipt and the app remembers what you paid. Add "milk" to the list and the price you usually pay shows up next to it, styled like a shelf tag.
+- **Estimated total** for the list, and a place to record what you actually paid when you finish shopping.
+- **Shelf price check.** Tap an item, type the price on the shelf, and see whether it's cheaper, normal or more expensive than usual.
+- **"Probably running out" suggestions,** based on how often you buy each product.
+- **One list for the whole family,** synced in real time, including offline use inside the store.
 
-בלי AI ובלי עלות. החישובים רצים בדפדפן, והשיתוף עובד על התוכנית החינמית של Firebase.
+No AI and no running costs. All the calculations happen in the browser, and sharing runs on Firebase's free plan.
 
-## איך זה עובד
+## How it works
 
-1. פותחים את קישור הקבלה מה־SMS ושומרים את קובץ ה־PDF.
-2. במסך **קבלות** מעלים את הקובץ. אפשר גם להדביק את הטקסט של הקבלה.
-3. בפעם הראשונה שמופיע מוצר, נותנים לו שם (למשל "חלב"). האפליקציה מזהה אותו לפי הברקוד, כך שבפעמים הבאות זה אוטומטי.
-4. במסך **רשימה** מוסיפים מוצרים ורואים מחירים, סכום משוער והצעות.
-5. במסך **משפחה** יוצרים רשימה משותפת ושולחים את קישור ההזמנה.
+1. Open the receipt link from the SMS and save the PDF.
+2. On the **קבלות** (Receipts) screen, upload the file, or paste the receipt's text.
+3. The first time a product appears, give it a name (for example "חלב"). Products are recognized by barcode, so after that it's automatic.
+4. On the **רשימה** (List) screen, add items and see prices, the estimated total and suggestions.
+5. On the **משפחה** (Family) screen, create a shared list and send the invite link.
 
-כרגע הפענוח נבדק על קבלות של יוחננוף (פורמט Weezmo). רשתות אחרות שמשתמשות באותו פורמט אמורות לעבוד גם הן.
+Receipt parsing is tested with Yohananof receipts in the Weezmo format. Other chains that use the same format should work too.
 
-## הגדרת Firebase (פעם אחת)
+### How prices and suggestions are calculated
 
-הפרויקט `more-the-merrier` כבר מחובר בקובץ `js/cloud.js`. צריך עוד שני דברים בקונסולה של Firebase:
+- **Usual price:** the median shelf price over the last year, so a one-off sale doesn't skew it.
+- **Estimated total:** for each item, the median amount spent on it per shopping trip (three cottage cheeses count as three).
+- **Suggestions:** the median number of days between purchases of a product. An item is suggested when it's due within two days, and dropped if it's more than three intervals overdue.
+- **Matching list items to products:** an exact name match first. Otherwise, the most frequently bought product whose name contains what you typed as whole words ("עגבניות" → "עגבניות שרי"). Similar products are never merged.
 
-1. **כניסה אנונימית:** Build ← Authentication ← Sign-in method ← Add new provider ← **Anonymous** ← Enable ← Save.
-   כך אף אחד במשפחה לא צריך חשבון או סיסמה. מצטרפים עם קישור ההזמנה.
-2. **כללי אבטחה:** Build ← Firestore Database ← לשונית **Rules**. מוחקים את מה שיש, מדביקים את כל התוכן של הקובץ `firestore.rules`, ולוחצים **Publish**.
-   הכללים מבטיחים שרק מי שהצטרף לרשימה יכול לקרוא או לשנות אותה.
+## Firebase setup (one time)
 
-## שיתוף עם המשפחה
+The Firebase project `more-the-merrier` is already configured in `js/cloud.js`. Two settings are needed in the Firebase console:
 
-1. במסך **משפחה** לוחצים "יצירת רשימה משותפת". מה שכבר שמור בטלפון עולה לרשימה.
-2. שולחים לבני המשפחה את קישור ההזמנה (בוואטסאפ, למשל).
-3. מי שפותח את הקישור לוחץ "הצטרפות", ומאותו רגע כולם מסונכרנים. אם היו לו מוצרים או קבלות, הם מתווספים לרשימה המשותפת.
+1. **Anonymous sign-in:** Build → Authentication → Sign-in method → Add new provider → **Anonymous** → Enable → Save.
+   Nobody in the family needs an account or a password. People join with the invite link.
+2. **Security rules:** Build → Firestore Database → **Rules** tab. Replace the contents with the file `firestore.rules` and click **Publish**.
+   The rules make sure only members of a household can read or change its data.
 
-**חשוב לשמור את קישור ההזמנה.** הוא גם הדרך לחזור לרשימה מטלפון חדש, או אם נתוני הדפדפן נמחקו.
+Collections appear in Firestore only after the first shared list is created.
 
-האפליקציה עובדת גם בלי קליטה (למשל בתוך הסופר). השינויים נשמרים ומסתנכרנים כשהחיבור חוזר.
+## Sharing with family
 
-## העלאה ל־GitHub Pages
+1. On the **משפחה** screen, tap "יצירת רשימה משותפת" (create shared list). Everything already saved on the phone is uploaded.
+2. Send the invite link to your family (on WhatsApp, for example).
+3. Whoever opens the link taps "הצטרפות" (join), and from then on everyone is in sync. Anything they already had on their phone is added to the shared list. Products with the same name become one.
 
-1. יוצרים repository חדש ב־GitHub ומעלים אליו את כל הקבצים שבתיקייה הזו.
-2. ב־repository: **Settings ← Pages**. תחת Source בוחרים `Deploy from a branch`, ענף `main`, תיקייה `/ (root)`, ושומרים.
-3. אחרי דקה בערך האתר יהיה זמין בכתובת `https://<שם-המשתמש>.github.io/<שם-ה-repository>/`.
-4. בטלפון פותחים את הכתובת ומוסיפים למסך הבית:
-   - **אייפון (Safari):** כפתור השיתוף ← "הוספה למסך הבית".
-   - **אנדרואיד (Chrome):** תפריט ⋮ ← "הוספה למסך הבית" או "התקנת אפליקציה".
+**Keep the invite link.** It's also how you get back to the list from a new phone, or after browser data is cleared.
 
-   באייפון זה חשוב במיוחד: Safari מוחק נתונים של אתרים שלא נפתחו 7 ימים, אבל לא של אתר שנוסף למסך הבית.
+### Data model
 
-## הרצה מקומית
+```
+households/{householdId}            { members: [uid], createdAt }
+households/{householdId}/list       shopping-list items
+households/{householdId}/receipts   receipt details and their purchase lines
+households/{householdId}/trips      finished shopping trips (estimate vs. actual)
+households/{householdId}/meta/catalog   { products, codeMap, dismissed }
+```
 
-הדפדפן לא מריץ service worker מקובץ מקומי, אז צריך שרת קטן:
+The household ID is a random 20-character code. Knowing it (from the invite link) is what allows someone to join, and joining can only add yourself to the members list.
+
+## Deploying to GitHub Pages
+
+The site is served from the `main` branch: **Settings → Pages → Deploy from a branch → `main` / `(root)`**.
+
+It's available at **https://mor-the-merrier.github.io/shopping-list/**.
+
+On a phone, open the address and add it to the home screen:
+
+- **iPhone (Safari):** Share button → "Add to Home Screen".
+- **Android (Chrome):** ⋮ menu → "Add to Home screen" or "Install app".
+
+This matters on iPhone in particular: Safari clears data for sites that haven't been opened in 7 days, but not for sites added to the home screen.
+
+## Running locally
+
+Service workers don't run from a local file, so use a small server:
 
 ```bash
 npx serve .
-# או
+# or
 python3 -m http.server 8000
 ```
 
-## בדיקות
+## Tests
 
 ```bash
-node test/parser.test.js
-node test/store.test.js
-node test/cloud.test.js   # סנכרון בין שני "טלפונים" מול Firebase מדומה
+node test/parser.test.js   # receipt parsing
+node test/store.test.js    # prices, frequency, suggestions, totals
+node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 ```
 
-## מבנה הקבצים
+`test/sample-yohananof.txt` is a made-up receipt in the Weezmo format. Its products, barcodes and prices are fictional.
 
-| קובץ | מה יש בו |
+## Files
+
+| File | Contents |
 |---|---|
-| `index.html` | שלד הדף |
-| `css/style.css` | העיצוב (כולל מצב כהה) |
-| `js/parser.js` | פענוח טקסט של קבלה לשורות מוצר, מחיר וכמות |
-| `js/pdf.js` | חילוץ טקסט מקובץ PDF עם pdf.js |
-| `js/store.js` | שמירת נתונים, מחיר רגיל (חציון), תדירות קנייה וסכום משוער |
-| `js/cloud.js` | השיתוף המשפחתי: סנכרון עם Firebase, הזמנה והצטרפות |
-| `js/app.js` | המסכים והאינטראקציה |
-| `firestore.rules` | כללי האבטחה של מסד הנתונים |
-| `sw.js` | מאפשר לפתוח את האפליקציה בלי אינטרנט |
-| `test/` | בדיקות וקבלה לדוגמה |
+| `index.html` | Page skeleton |
+| `css/style.css` | Styles, including dark mode |
+| `js/parser.js` | Turns receipt text into product, price and quantity lines |
+| `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
+| `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
+| `js/cloud.js` | Family sharing: Firebase sync, invites and joining |
+| `js/app.js` | Screens and interaction |
+| `firestore.rules` | Database security rules |
+| `sw.js` | Lets the app open without an internet connection |
+| `test/` | Tests and a sample receipt |
 
-## חשוב לדעת
+## Good to know
 
-- הגדרות Firebase שבקובץ `js/cloud.js` מזהות את הפרויקט ואינן סיסמה. מה שמגן על הנתונים הוא כללי האבטחה.
-- התוכנית החינמית של Firebase לא דורשת כרטיס אשראי. אם מגיעים למכסה, הבקשות נדחות ולא מחויבות.
-- אחרי שינוי בקוד, כדאי להעלות את מספר הגרסה בשורה `const CACHE` שבקובץ `sw.js`, כדי שהטלפון יטען את הגרסה החדשה.
+- The Firebase settings in `js/cloud.js` identify the project and aren't a secret. The security rules are what protect the data.
+- Firebase's free plan doesn't require a credit card. If a quota is reached, requests are refused rather than billed.
+- After changing the code, bump the version in the `const CACHE` line of `sw.js` so phones load the new version.
