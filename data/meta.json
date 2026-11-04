@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-04T10:29:17Z",
+  "updated": "2026-11-04T10:45:02Z",
   "source": "Supermarket chains' public price files (Price Transparency regulations)",
   "stores": [
     {
@@ -54,21 +54,56 @@
     },
     {
       "chain": "יוחננוף",
-      "file": "PriceFull7290803800003-7999-202412271528.gz",
-      "items": 7527
+      "file": "PriceFull7290803800003-000-073-20261104-004032.gz",
+      "items": 11775
     },
     {
       "chain": "יוחננוף",
-      "file": "PriceFull7290803800003-000-073-20261104-004032.gz",
-      "items": 11775
+      "file": "PriceFull7290803800003-000-060-20261104-004032.gz",
+      "items": 7957
+    },
+    {
+      "chain": "יוחננוף",
+      "file": "PriceFull7290803800003-000-059-20261104-004032.gz",
+      "items": 6416
+    },
+    {
+      "chain": "יוחננוף",
+      "file": "PriceFull7290803800003-000-055-20261104-004032.gz",
+      "items": 7472
+    },
+    {
+      "chain": "יוחננוף",
+      "file": "PriceFull7290803800003-000-054-20261104-004032.gz",
+      "items": 3774
     },
     {
       "chain": "רמי לוי",
       "file": "PriceFull7290058140886-001-737-20261104-120005.gz",
       "items": 3471
+    },
+    {
+      "chain": "רמי לוי",
+      "file": "PriceFull7290058140886-001-736-20261104-120005.gz",
+      "items": 6612
+    },
+    {
+      "chain": "רמי לוי",
+      "file": "PriceFull7290058140886-001-735-20261104-060005.gz",
+      "items": 5615
+    },
+    {
+      "chain": "רמי לוי",
+      "file": "PriceFull7290058140886-001-734-20261104-120015.gz",
+      "items": 5125
+    },
+    {
+      "chain": "רמי לוי",
+      "file": "PriceFull7290058140886-001-733-20261104-120005.gz",
+      "items": 4229
     }
   ],
-  "barcodes": 30015,
-  "words": 7686,
+  "barcodes": 32820,
+  "words": 8799,
   "errors": []
 }
