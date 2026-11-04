@@ -1,17 +1,74 @@
 {
-  "updated": "2026-11-04T10:17:35Z",
-  "source": "Shufersal public price files (Price Transparency regulations)",
+  "updated": "2026-11-04T10:29:17Z",
+  "source": "Supermarket chains' public price files (Price Transparency regulations)",
   "stores": [
     {
+      "chain": "שופרסל",
       "store": "001",
       "items": 6551
     },
     {
+      "chain": "שופרסל",
       "store": "002",
       "items": 8131
+    },
+    {
+      "chain": "שופרסל",
+      "store": "003",
+      "items": 10403
+    },
+    {
+      "chain": "שופרסל",
+      "store": "005",
+      "items": 4294
+    },
+    {
+      "chain": "שופרסל",
+      "store": "006",
+      "items": 5841
+    },
+    {
+      "chain": "שופרסל",
+      "store": "007",
+      "items": 4689
+    },
+    {
+      "chain": "שופרסל",
+      "store": "008",
+      "items": 9322
+    },
+    {
+      "chain": "שופרסל",
+      "store": "015",
+      "items": 5923
+    },
+    {
+      "chain": "שופרסל",
+      "store": "018",
+      "items": 3256
+    },
+    {
+      "chain": "שופרסל",
+      "store": "032",
+      "items": 4021
+    },
+    {
+      "chain": "יוחננוף",
+      "file": "PriceFull7290803800003-7999-202412271528.gz",
+      "items": 7527
+    },
+    {
+      "chain": "יוחננוף",
+      "file": "PriceFull7290803800003-000-073-20261104-004032.gz",
+      "items": 11775
+    },
+    {
+      "chain": "רמי לוי",
+      "file": "PriceFull7290058140886-001-737-20261104-120005.gz",
+      "items": 3471
     }
   ],
-  "barcodes": 8149,
-  "words": 3566,
+  "barcodes": 30015,
+  "words": 7686,
   "errors": []
 }
