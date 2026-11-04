@@ -105,6 +105,8 @@
     // two digits off only when the name or price backs it up
     for (const c of twoDigitsAway(it.code)) {
       if (!isKnown(c)) continue;
+      // two misread digits happen, but so do look-alike barcodes: the name must agree too
+      if (nameLikeness(it.ocrName || it.name, nameOf(c)) < 0.25) continue;
       const s = score(c, 2);
       if (s < 1.2) scored.push({ c, s });
     }
@@ -168,12 +170,14 @@
       if (alt != null && alt > 0 && !agreed && Math.abs(alt - it.total) < 10) {
         opts2.push({ delta: cents(alt) - cents(it.total), cost: 0.4, set: { total: alt, unitPrice: round2(alt / qty) } });
       }
-      if (!it.sure && !it.weighted) {
+      if (!it.weighted && !refs.some((p) => Math.abs(p - it.unitPrice) < 0.005)) {
         for (const p of refs) {
           const pos = oneDigitApart(p, it.unitPrice);
           if (pos < 0) continue;
           const total = round2(p * qty);
-          opts2.push({ delta: cents(total) - cents(it.total), cost: pos === 0 ? 0.3 : 0.6, set: { unitPrice: p, total }, known: true });
+          // taken at once when the two readings disagreed; otherwise only to make the total add up
+          const cost = agreed ? 0.7 : pos === 0 ? 0.3 : 0.6;
+          opts2.push({ delta: cents(total) - cents(it.total), cost, set: { unitPrice: p, total }, known: true });
         }
       }
       // the last digit of the amount, of any line (weighed ones too)
@@ -182,7 +186,9 @@
         const v = Math.floor(base / 10) * 10 + d;
         if (v === base || v <= 0) continue;
         const total = v / 100;
-        opts2.push({ delta: v - base, cost: d === 0 ? 0.9 : 1.2, set: { total, unitPrice: it.weighted ? it.unitPrice : round2(total / qty) } });
+        // cheaper on a line whose two readings disagreed
+        const cost = agreed ? (d === 0 ? 1.8 : 2) : d === 0 ? 0.8 : 1;
+        opts2.push({ delta: v - base, cost, set: { total, unitPrice: it.weighted ? it.unitPrice : round2(total / qty) } });
       }
       // a discount's last digit (discounts are usually round)
       if (it.discount) {
@@ -190,7 +196,7 @@
         for (let d = 0; d <= 9; d++) {
           const v = Math.floor(b / 10) * 10 + d;
           if (v === b) continue;
-          opts2.push({ delta: b - v, cost: d === 0 ? 0.8 : 1.2, set: { discount: -v / 100 } });
+          opts2.push({ delta: b - v, cost: d === 0 ? 0.6 : 1.5, set: { discount: -v / 100 } });
         }
       }
       return opts2;
