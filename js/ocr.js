@@ -161,5 +161,151 @@
     }
   }
 
-  root.ReceiptOcr = { readPictureReceipt, loadTesseract };
+  // ---------- photos of paper receipts ----------
+
+  const PHOTO_WIDTH = 2000; // receipt width after cropping: dot-matrix text gets ~35px tall
+  const PHOTO_MAX_PIXELS = 12e6;
+
+  async function loadBitmap(file) {
+    if (root.createImageBitmap) {
+      try {
+        return await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch (e) {
+        /* fall back to <img> */
+      }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      return await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('לא הצלחתי לפתוח את התמונה'));
+        i.src = url;
+      });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  }
+
+  function grayCanvas(gray, width, height) {
+    const c = canvasOf(width, height);
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(width, height);
+    for (let p = 0, i = 0; p < gray.length; p++, i += 4) {
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = gray[p];
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+
+  /** Photo → cropped, cleaned canvases: { text, digits, width, height }. */
+  async function preparePhoto(file) {
+    const P = root.PaperReceipt;
+    const bmp = await loadBitmap(file);
+    const W0 = bmp.width || bmp.naturalWidth;
+    const H0 = bmp.height || bmp.naturalHeight;
+
+    // find the paper on a small copy
+    const s = Math.min(1, 900 / Math.max(W0, H0));
+    const small = canvasOf(W0 * s, H0 * s);
+    small.getContext('2d').drawImage(bmp, 0, 0, small.width, small.height);
+    const sd = small.getContext('2d').getImageData(0, 0, small.width, small.height);
+    const box = P.findPaper(sd.data, small.width, small.height);
+    const cx = box.x0 / s, cy = box.y0 / s, cw = (box.x1 - box.x0 + 1) / s, ch = (box.y1 - box.y0 + 1) / s;
+
+    // crop and scale the receipt to a working size
+    let scale = PHOTO_WIDTH / cw;
+    if (cw * ch * scale * scale > PHOTO_MAX_PIXELS) scale = Math.sqrt(PHOTO_MAX_PIXELS / (cw * ch));
+    const work = canvasOf(cw * scale, ch * scale);
+    const wctx = work.getContext('2d');
+    wctx.imageSmoothingQuality = 'high';
+    wctx.drawImage(bmp, cx, cy, cw, ch, 0, 0, work.width, work.height);
+    if (bmp.close) bmp.close();
+
+    const data = wctx.getImageData(0, 0, work.width, work.height).data;
+    const clean = P.cleanForOcr(data, work.width, work.height);
+    return {
+      text: grayCanvas(clean.text, work.width, work.height),
+      digits: grayCanvas(clean.digits, work.width, work.height),
+      width: work.width,
+      height: work.height,
+    };
+  }
+
+  /** A vertical strip of a canvas, enlarged (digits read better a bit bigger). */
+  function strip(canvas, x0, x1, scale = 1.5) {
+    x0 = Math.max(0, Math.round(x0));
+    x1 = Math.min(canvas.width, Math.round(x1));
+    const c = canvasOf((x1 - x0) * scale, canvas.height * scale);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, x0, 0, x1 - x0, canvas.height, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  /** Strip words → full-image coordinates. */
+  function unstrip(words, x0, scale = 1.5) {
+    return words.map((w) => ({
+      text: w.text,
+      bbox: { x0: w.bbox.x0 / scale + x0, y0: w.bbox.y0 / scale, x1: w.bbox.x1 / scale + x0, y1: w.bbox.y1 / scale },
+    }));
+  }
+
+  /**
+   * Read photos of one paper receipt. Returns one reading per photo:
+   * { text, words, codeWords, amountWords, width, codeFrom, amountTo }.
+   * onProgress(fraction, label).
+   */
+  async function readPaperPhotos(files, onProgress = () => {}) {
+    const n = files.length;
+    const Tesseract = await loadTesseract();
+    let photo = 0;
+    let stage = 0;
+    const label = () => `קורא את הקבלה${n > 1 ? ` (צילום ${photo + 1} מתוך ${n})` : ''}`;
+    const logger = (m) => {
+      if (m.status === 'recognizing text') onProgress((photo + (stage + m.progress) / 3) / n, label());
+      else if (/loading|initializ/i.test(m.status)) onProgress(0.02, 'טוען את זיהוי הטקסט');
+    };
+    const heb = await Tesseract.createWorker('heb', 1, { logger });
+    const digits = await Tesseract.createWorker('eng', 1, { logger });
+    const out = [];
+    try {
+      for (photo = 0; photo < n; photo++) {
+        stage = 0;
+        onProgress(photo / n, `מכין את התמונה${n > 1 ? ` (${photo + 1} מתוך ${n})` : ''}`);
+        const img = await preparePhoto(files[photo]);
+
+        await heb.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
+        const r1 = await heb.recognize(img.text);
+        const words = wordsOf(r1.data, 0);
+        const cols = root.PaperReceipt.findColumns(words, img.width);
+
+        stage = 1;
+        await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.' });
+        const r2 = await digits.recognize(strip(img.digits, cols.codeFrom, img.width));
+
+        stage = 2;
+        await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.-' });
+        const r3 = await digits.recognize(strip(img.text, 0, cols.amountTo));
+
+        out.push({
+          text: r1.data.text || '',
+          words,
+          codeWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
+          amountWords: unstrip(wordsOf(r3.data, 0), 0),
+          width: img.width,
+          codeFrom: cols.codeFrom,
+          amountTo: cols.amountTo,
+        });
+      }
+      onProgress(1, 'מסיים');
+      return out;
+    } finally {
+      heb.terminate();
+      digits.terminate();
+    }
+  }
+
+  root.ReceiptOcr = { readPictureReceipt, readPaperPhotos, preparePhoto, strip, unstrip, loadTesseract };
 })(window);

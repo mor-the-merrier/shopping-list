@@ -457,48 +457,7 @@
   // ---------- receipts screen ----------
   function renderReceipts() {
     let pendingHtml = '';
-    if (ui.pending) {
-      const { parsed, duplicate, text } = ui.pending;
-      // The date field below handles a missing date, so don't repeat it as a warning.
-      const warnings = parsed.warnings
-        .filter((w) => !/תאריך/.test(w))
-        .map((w) => `<p class="notice">${esc(w)}</p>`)
-        .join('');
-      if (!parsed.items.length) {
-        pendingHtml = `
-          <section class="panel">
-            <h3>לא הצלחתי לקרוא את הקבלה</h3>
-            <p>הטקסט שחולץ מהקובץ מופיע למטה. אם זו קבלה מרשת אחרת, אפשר להעתיק אותו ולשלוח כדי להוסיף לה תמיכה.</p>
-            <details><summary>הטקסט שחולץ</summary><pre class="debug" id="extractedText">${esc(text)}</pre></details>
-            <div class="actions">
-              <button class="btn small" data-act="copy-extracted">העתקת הטקסט</button>
-              <button class="btn secondary small" data-act="cancel">סגירה</button>
-            </div>
-          </section>`;
-      } else {
-        pendingHtml = `
-          <section class="panel">
-            <h3>${esc(parsed.chain.name)}${parsed.date ? `, ${dateHe(parsed.date)}` : ''}</h3>
-            <p>${parsed.items.length} שורות, סה״כ ₪${money(parsed.total)}</p>
-            ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : warnings || '<p class="notice ok">כל השורות זוהו והסכום תואם לקבלה.</p>'}
-            ${
-              duplicate
-                ? ''
-                : `<div class="receipt-date${parsed.date ? '' : ' missing'}">
-                     <label for="receiptDate">${parsed.date ? 'תאריך הקנייה' : 'לא מצאתי תאריך בקבלה. מתי הייתה הקנייה?'}</label>
-                     <div class="rename-row">
-                       <input type="date" id="receiptDate" value="${esc(parsed.date || '')}" max="${window.KniyotStore.todayISO()}">
-                       ${parsed.date ? '' : '<button class="btn secondary small" type="button" data-act="date-today">היום</button>'}
-                     </div>
-                   </div>`
-            }
-            <div class="actions">
-              ${duplicate ? '' : `<button class="btn" data-act="save-receipt" ${parsed.date ? '' : 'disabled'}>שמירת הקבלה</button>`}
-              <button class="btn secondary" data-act="cancel">ביטול</button>
-            </div>
-          </section>`;
-      }
-    }
+    if (ui.pending) pendingHtml = pendingPanelHtml();
 
     let mapHtml = '';
     if (ui.unknown && ui.unknown.length) {
@@ -549,13 +508,22 @@
                <h3>קורא את הקבלה</h3>
                <p id="ocrLabel">${esc(ui.ocr.label)}</p>
                <div class="ocr-track"><div class="ocr-bar" id="ocrBar" style="width: ${Math.round(ui.ocr.progress * 100)}%"></div></div>
-               <p class="hint">קבלה שהיא תמונה (כמו של שופרסל) נקראת בזיהוי טקסט בטלפון עצמו. זה לוקח כחצי דקה, ובפעם הראשונה קצת יותר.</p>
+               <p class="hint">הקבלה נקראת בזיהוי טקסט בטלפון עצמו, בלי לשלוח אותה לשום מקום. זה לוקח כחצי דקה לכל צילום, ובפעם הראשונה קצת יותר.</p>
              </section>`
-          : `<label class="upload">
-               <input type="file" id="pdfInput" accept="application/pdf,.pdf,image/*">
-               <strong>העלאת קבלה</strong>
-               <span>PDF מהקישור ב־SMS, או צילום מסך של הקבלה. עובד עם יוחננוף ושופרסל.</span>
-             </label>`
+          : ui.pending
+          ? ''
+          : `<div class="upload-row">
+               <label class="upload">
+                 <input type="file" id="pdfInput" accept="application/pdf,.pdf,image/*" multiple>
+                 <strong>העלאת קבלה</strong>
+                 <span>PDF מהקישור ב־SMS, צילום מסך, או כמה צילומים של קבלה ארוכה.</span>
+               </label>
+               <label class="upload camera">
+                 <input type="file" id="cameraInput" accept="image/*" capture="environment">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>
+                 <strong>צילום קבלת נייר</strong>
+               </label>
+             </div>`
       }
       <details class="paste">
         <summary>או הדבקת הטקסט של הקבלה</summary>
@@ -584,9 +552,176 @@
     showParsed(best.parsed, best.text);
   }
 
-  function showParsed(parsed, text) {
-    ui.pending = { parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text };
+  function showParsed(parsed, text, extra = {}) {
+    ui.pending = Object.assign({ parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text }, extra);
+    // Open the line editor when something needs checking.
+    const mismatch = parsed.totalFound !== false && Math.abs(parsed.itemsSum - parsed.total) > 0.1;
+    ui.pending.editing = !!extra.photo || mismatch || parsed.totalFound === false;
     render();
+  }
+
+  // ---------- reviewing a receipt before saving ----------
+  const round2r = (n) => Math.round(n * 100) / 100;
+
+  function recalcPending() {
+    const p = ui.pending.parsed;
+    p.itemsSum = round2r(p.items.reduce((s, i) => s + (Number(i.total) || 0) + (Number(i.discount) || 0), 0));
+    if (!p.totalFound) p.total = p.itemsSum;
+    ui.pending.duplicate = p.items.length && p.date ? store.isDuplicate(p) : false;
+  }
+
+  function lastStoreName() {
+    try {
+      return localStorage.getItem('kniyot.lastStore') || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function pendingPanelHtml() {
+    const { parsed, duplicate, text, photo, photoCount, editing } = ui.pending;
+    const items = parsed.items;
+    const storeName = photo ? ui.pending.storeName : parsed.chain.name;
+
+    if (!items.length && !photo) {
+      return `
+        <section class="panel">
+          <h3>לא הצלחתי לקרוא את הקבלה</h3>
+          <p>הטקסט שחולץ מהקובץ מופיע למטה. אם זו קבלה מרשת אחרת, אפשר להעתיק אותו ולשלוח כדי להוסיף לה תמיכה.</p>
+          <details><summary>הטקסט שחולץ</summary><pre class="debug" id="extractedText">${esc(text)}</pre></details>
+          <div class="actions">
+            <button class="btn small" data-act="copy-extracted">העתקת הטקסט</button>
+            <button class="btn secondary small" data-act="cancel">סגירה</button>
+          </div>
+        </section>`;
+    }
+
+    // how the lines compare with the receipt's total
+    let check;
+    if (!items.length) {
+      check = `<p class="notice">לא הצלחתי לקרוא שורות מהצילום. כדאי לצלם שוב קרוב יותר, ישר מעל הקבלה ובאור טוב, או להוסיף שורות ידנית.</p>`;
+    } else if (parsed.totalFound === false) {
+      check = `<p class="notice">לא מצאתי את הסה״כ בצילום. סכום השורות: <b>₪${money(parsed.itemsSum)}</b>. כדאי לבדוק מול הקבלה.</p>`;
+    } else if (Math.abs(parsed.itemsSum - parsed.total) > 0.1) {
+      check = `<p class="notice">סכום השורות ₪${money(parsed.itemsSum)}, ובקבלה ₪${money(parsed.total)}. אפשר לתקן את השורות למטה.</p>`;
+    } else {
+      check = `<p class="notice ok">סכום השורות תואם לקבלה: ₪${money(parsed.total)}.</p>`;
+    }
+
+    const rowsHtml = items
+      .map((it, i) => {
+        const qty = it.qty !== 1 ? `<span class="line-qty">${it.weighted ? `${it.qty} ק״ג` : `${it.qty} ×`} ₪${money(it.unitPrice)}</span>` : '';
+        return `
+          <li class="line-row">
+            <div class="line-main">
+              <label class="sr-only" for="ln-${i}">שם בשורה ${i + 1}</label>
+              <input id="ln-${i}" class="line-name" data-line="${i}" data-field="name" value="${esc(it.name)}" placeholder="שם המוצר" autocomplete="off">
+              ${it.code ? `<span class="line-code">${esc(it.code)}</span>` : ''}${qty}
+            </div>
+            <label class="sr-only" for="lp-${i}">מחיר בשורה ${i + 1}</label>
+            <input id="lp-${i}" class="line-price" data-line="${i}" data-field="total" value="${money(it.total)}" inputmode="decimal" autocomplete="off">
+            <button class="remove" data-remove-line="${i}" aria-label="הסרת השורה ${esc(it.name || i + 1)}">×</button>
+          </li>`;
+      })
+      .join('');
+
+    const canSave = !duplicate && parsed.date && items.length && (!photo || String(storeName || '').trim());
+
+    return `
+      <section class="panel review">
+        <h3>${esc(storeName || 'קבלה מצולמת')}${parsed.date ? `, ${dateHe(parsed.date)}` : ''}</h3>
+        <p>${items.length} שורות${photo ? ` · ${photoCount === 1 ? 'צילום אחד' : `${photoCount} צילומים`}` : ''}</p>
+        ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : check}
+
+        ${
+          photo
+            ? `<div class="review-field">
+                 <label for="storeInput">החנות</label>
+                 <input id="storeInput" value="${esc(storeName || '')}" placeholder="למשל סופר כח" list="storeNames" autocomplete="off">
+               </div>
+               <label class="add-photo">
+                 <input type="file" id="photoAppend" accept="image/*" multiple>
+                 <span>+ הוספת צילום להמשך הקבלה</span>
+               </label>`
+            : ''
+        }
+
+        ${
+          duplicate
+            ? ''
+            : `<div class="receipt-date${parsed.date ? '' : ' missing'}">
+                 <label for="receiptDate">${parsed.date ? 'תאריך הקנייה' : 'לא מצאתי תאריך בקבלה. מתי הייתה הקנייה?'}</label>
+                 <div class="rename-row">
+                   <input type="date" id="receiptDate" value="${esc(parsed.date || '')}" max="${window.KniyotStore.todayISO()}">
+                   ${parsed.date ? '' : '<button class="btn secondary small" type="button" data-act="date-today">היום</button>'}
+                 </div>
+               </div>`
+        }
+
+        <details class="lines" ${editing ? 'open' : ''}>
+          <summary>בדיקה ותיקון של השורות (${items.length})</summary>
+          ${photo ? '<p class="hint">בצילום השמות יוצאים לפעמים משובשים. זה בסדר: הברקוד והמחיר הם מה שחשוב, ואת השם נותנים פעם אחת בשלב הבא.</p>' : ''}
+          <ul class="line-list">${rowsHtml}</ul>
+          <button class="link" data-act="add-line">+ הוספת שורה</button>
+        </details>
+
+        <div class="actions">
+          ${duplicate ? '' : `<button class="btn" data-act="save-receipt" ${canSave ? '' : 'disabled'}>שמירת הקבלה</button>`}
+          <button class="btn secondary" data-act="cancel">ביטול</button>
+        </div>
+        ${photo && !String(storeName || '').trim() ? '<p class="hint">כדי לשמור, צריך לכתוב את שם החנות.</p>' : ''}
+        <details><summary class="hint">מה זוהה בצילום</summary><pre class="debug" id="extractedText">${esc(text)}</pre>
+          <button class="btn small secondary" data-act="copy-extracted">העתקת הטקסט</button></details>
+      </section>
+      <datalist id="storeNames">${(window.PaperReceipt ? window.PaperReceipt.KNOWN : []).map((k) => `<option value="${esc(k.name)}"></option>`).join('')}</datalist>`;
+  }
+
+  /** Photos of a paper receipt: read each, merge them, open the review. */
+  async function readPhotos(files, append = false) {
+    const list = Array.from(files).sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0)); // shooting order
+    const prev = append && ui.pending && ui.pending.photo ? ui.pending : null;
+    const keep = prev ? { storeName: prev.storeName, date: prev.parsed.date } : null;
+    ui.ocr = { progress: 0, label: 'מכין את התמונה' };
+    ui.pending = null;
+    render();
+    const progress = (p, label) => {
+      ui.ocr = { progress: p, label };
+      const bar = document.getElementById('ocrBar');
+      const t = document.getElementById('ocrLabel');
+      if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+      if (t) t.textContent = label;
+    };
+    let readings;
+    try {
+      readings = await window.ReceiptOcr.readPaperPhotos(list, progress);
+    } catch (err) {
+      ui.ocr = null;
+      if (prev) ui.pending = prev; // keep what was there before the failed photo
+      throw err;
+    }
+    ui.ocr = null;
+
+    const S = window.Shufersal;
+    const P = window.PaperReceipt;
+    const allText = readings.map((r) => r.text).join('\n');
+    const detected = P.detectStore(allText);
+    const parts = readings.map((r) => {
+      const rows = S.buildRows(r);
+      const parsed = S.parseRows(rows, r.text, { paper: true, chain: detected || { id: 'unknown', name: '' } });
+      parsed.debug = rows.map((x) => [x.code, x.desc, x.amount].filter(Boolean).join(' | ')).join('\n');
+      return parsed;
+    });
+    const allParts = (prev ? prev.parts : []).concat(parts);
+    const merged = P.mergePhotos(allParts);
+    if (keep && keep.date && !merged.date) merged.date = keep.date;
+    const storeName = (keep && keep.storeName) || (detected && detected.name) || lastStoreName();
+    showParsed(merged, allParts.map((p, i) => `--- צילום ${i + 1} ---\n${p.debug}`).join('\n'), {
+      photo: true,
+      parts: allParts,
+      photoCount: allParts.length,
+      storeName,
+    });
+    if (merged.overlapDropped) toast(`${merged.overlapDropped} שורות הופיעו בשני צילומים ונספרו פעם אחת`);
   }
 
   /** Picture receipts (Shufersal's PDF, screenshots): OCR in the browser, with progress. */
@@ -1009,6 +1144,18 @@
     } else if (t.dataset.act === 'parse-paste') {
       const text = document.getElementById('pasteInput').value;
       if (text.trim()) handleParsed(text);
+    } else if (t.dataset.removeLine != null && ui.pending) {
+      ui.pending.parsed.items.splice(+t.dataset.removeLine, 1);
+      ui.pending.editing = true;
+      recalcPending();
+      render();
+    } else if (t.dataset.act === 'add-line' && ui.pending) {
+      ui.pending.parsed.items.push({ code: '', name: '', unitPrice: 0, qty: 1, total: 0, discount: 0, weighted: false });
+      ui.pending.editing = true;
+      recalcPending();
+      render();
+      const inputs = view.querySelectorAll('.line-name');
+      if (inputs.length) inputs[inputs.length - 1].focus();
     } else if (t.dataset.act === 'date-today' && ui.pending) {
       setReceiptDate(window.KniyotStore.todayISO());
     } else if (t.dataset.act === 'save-receipt' && ui.pending) {
@@ -1016,6 +1163,22 @@
         toast('צריך לבחור את תאריך הקנייה');
         return;
       }
+      if (ui.pending.photo) {
+        const name = String(ui.pending.storeName || '').trim();
+        if (!name) {
+          toast('צריך לכתוב את שם החנות');
+          return;
+        }
+        ui.pending.parsed.chain = window.PaperReceipt.storeFromName(name);
+        try {
+          localStorage.setItem('kniyot.lastStore', ui.pending.parsed.chain.name);
+        } catch (e) {
+          /* not remembered, fine */
+        }
+      }
+      // lines left empty in the editor
+      ui.pending.parsed.items = ui.pending.parsed.items.filter((it) => (it.name || it.code) && it.total > 0);
+      ui.pending.parsed.itemCount = ui.pending.parsed.items.length;
       const { unknown } = store.importReceipt(ui.pending.parsed);
       ui.pending = null;
       ui.unknown = unknown;
@@ -1059,9 +1222,41 @@
     render();
   }
 
+  view.addEventListener(
+    'toggle',
+    (e) => {
+      if (e.target.classList && e.target.classList.contains('lines') && ui.pending) ui.pending.editing = e.target.open;
+    },
+    true
+  );
+
   view.addEventListener('change', async (e) => {
     if (e.target.id === 'receiptDate') {
       setReceiptDate(e.target.value);
+      return;
+    }
+    if (e.target.dataset && e.target.dataset.line != null && ui.pending) {
+      const it = ui.pending.parsed.items[+e.target.dataset.line];
+      if (!it) return;
+      if (e.target.dataset.field === 'name') it.name = e.target.value.trim();
+      else {
+        const v = parseFloat(e.target.value.replace(',', '.').replace('₪', ''));
+        if (isNaN(v) || v < 0) {
+          toast('המחיר צריך להיות מספר, למשל 8.90');
+          render();
+          return;
+        }
+        it.total = Math.round(v * 100) / 100;
+        it.unitPrice = it.qty ? Math.round((it.total / it.qty) * 100) / 100 : it.total;
+      }
+      ui.pending.editing = true;
+      recalcPending();
+      render();
+      return;
+    }
+    if (e.target.id === 'storeInput' && ui.pending) {
+      ui.pending.storeName = e.target.value.trim();
+      render();
       return;
     }
     if (e.target.dataset && e.target.dataset.itemCategory) {
@@ -1081,19 +1276,35 @@
       toast(`הועבר למחלקה: ${window.KniyotCategories.BY_ID[e.target.value].name}`);
       return;
     }
-    if (e.target.id === 'pdfInput' && e.target.files[0]) {
-      const file = e.target.files[0];
-      e.target.value = ''; // so choosing the same file again still triggers
-      const isImage = /^image\//.test(file.type);
+    if ((e.target.id === 'cameraInput' || e.target.id === 'photoAppend') && e.target.files.length) {
+      const files = Array.from(e.target.files);
+      const append = e.target.id === 'photoAppend';
+      e.target.value = '';
       try {
-        let readings = [];
-        if (!isImage) {
-          toast('קורא את הקבלה…');
-          readings = await window.PdfText.pdfToTexts(file);
+        await readPhotos(files, append);
+      } catch (err) {
+        console.error(err);
+        render();
+        toast(err.message || 'לא הצלחתי לקרוא את הצילום');
+      }
+      return;
+    }
+    if (e.target.id === 'pdfInput' && e.target.files.length) {
+      const files = Array.from(e.target.files);
+      e.target.value = ''; // so choosing the same file again still triggers
+      const images = files.filter((f) => /^image\//.test(f.type));
+      const file = files.find((f) => !/^image\//.test(f.type)) || files[0];
+      try {
+        // Pictures (photos of paper receipts, screenshots): read as a photo, several at once.
+        if (images.length === files.length) {
+          await readPhotos(images);
+          return;
         }
-        // A PDF with no text inside (like Shufersal's) or a screenshot: read the picture.
+        toast('קורא את הקבלה…');
+        const readings = await window.PdfText.pdfToTexts(file);
+        // A PDF with no text inside (like Shufersal's): read the picture.
         const hasText = readings.some((r) => r.text.replace(/\s/g, '').length > 40);
-        if (isImage || !hasText) await readPicture(file);
+        if (!hasText) await readPicture(file);
         else handleParsed(readings.map((r) => r.text));
       } catch (err) {
         console.error(err);
@@ -1113,6 +1324,13 @@
   });
 
   view.addEventListener('input', (e) => {
+    if (e.target.id === 'storeInput' && ui.pending) {
+      ui.pending.storeName = e.target.value.trim();
+      const p = ui.pending.parsed;
+      const btn = view.querySelector('[data-act=save-receipt]');
+      if (btn) btn.disabled = !(ui.pending.storeName && p.date && p.items.length && !ui.pending.duplicate);
+      return;
+    }
     if (e.target.form && e.target.form.dataset.compare) {
       e.target.form.requestSubmit();
     } else if (e.target.id === 'productSearch') {

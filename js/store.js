@@ -246,7 +246,8 @@
 
       const unknown = new Map();
       for (const item of parsed.items) {
-        const key = codeKey(receipt.chainId, item.code);
+        // No barcode (a line typed in by hand, or unread): keyed by its name.
+        const key = item.code ? codeKey(receipt.chainId, item.code) : `name:${norm(item.name)}`;
         this.state.purchases.push({
           receiptId: receipt.id,
           key,

@@ -1,5 +1,6 @@
 /*
- * Shufersal digital receipts.
+ * Picture receipts: Shufersal's digital receipt, and photos of paper receipts.
+ * (The file keeps its old name; js/paper.js adds the photo-specific parts.)
  *
  * Shufersal's receipt PDF is a picture of the receipt (no text inside), so the
  * app reads it with OCR (see js/ocr.js). This file turns the OCR words into
@@ -30,15 +31,18 @@
   /**
    * Merge the three OCR readings into rows.
    * Each word: { text, bbox: { x0, y0, x1, y1 } } in full-image pixels.
+   * codeFrom / amountTo: the column edges in pixels (default: Shufersal's layout).
    */
-  function buildRows({ words, codeWords, amountWords, width }) {
+  function buildRows({ words, codeWords, amountWords, width, codeFrom, amountTo }) {
+    const cFrom = codeFrom != null ? codeFrom : width * CODE_FROM;
+    const aTo = amountTo != null ? amountTo : width * AMOUNT_TO;
     const all = [];
     for (const w of words) {
-      const x = centerX(w);
-      if (x > width * CODE_FROM || x < width * AMOUNT_TO) continue; // number columns come from the digit passes
+      if (centerX(w) < aTo) continue; // the price column comes from the digit pass
       all.push({ kind: 'desc', w });
     }
-    for (const w of codeWords) all.push({ kind: 'code', w });
+    // A barcode never has "." or ":" (those are prices, percentages or times).
+    for (const w of codeWords) if (!/[.:]/.test(w.text)) all.push({ kind: 'code', w });
     for (const w of amountWords) all.push({ kind: 'amount', w });
     all.sort((a, b) => centerY(a.w) - centerY(b.w));
 
@@ -57,23 +61,33 @@
       row[a.kind].push(a.w);
     }
 
-    return rows.map((r) => ({
+    return rows.map((r) => {
+      // Barcodes are right-aligned: the rightmost number on the line is the code,
+      // anything left of it in the strip is part of the name read as digits.
+      const codeWord = r.code
+        .filter((w) => /\d{2,}/.test(w.text))
+        .sort((a, b) => b.bbox.x1 - a.bbox.x1)[0];
+      const descEdge = codeWord ? Math.min(codeWord.bbox.x0, cFrom + (width - cFrom) / 2) : cFrom;
+      return {
       y: Math.round(r.y),
-      code: r.code.map((w) => w.text).join('').replace(/\D/g, ''),
+      code: codeWord ? codeWord.text.replace(/\D/g, '') : '',
       // right-to-left reading order for the Hebrew description
       desc: r.desc
+        .filter((w) => centerX(w) < descEdge)
         .sort((a, b) => b.bbox.x1 - a.bbox.x1)
         .map((w) => w.text)
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim(),
       amount: r.amount.map((w) => w.text).join('').replace(/[^\d.-]/g, ''),
-    }));
+      };
+    });
   }
 
   /** "2.12-" or "-2.12" → -2.12; "14.89" → 14.89; no decimal point → null (not a price). */
   function parseAmount(s) {
-    const m = String(s || '').match(/^(-?)(\d+\.\d{1,2})(-?)$/);
+    // the first price-shaped number; stray digits stuck to it are OCR noise
+    const m = String(s || '').match(/(-?)(\d{1,4}\.\d{2})(-?)/);
     if (!m) return null;
     const v = parseFloat(m[2]);
     return m[1] || m[3] ? -v : v;
@@ -84,19 +98,46 @@
     return String(s || '').replace(/(\d)\s*[אxX×*]\s*(\d)/g, '$1 x $2').replace(/[‎‏‪-‮]/g, '');
   }
 
+  /** EAN-13 check digit: Israeli barcodes (729…) can be checked and sometimes repaired. */
+  function eanValid(code) {
+    if (!/^\d{13}$/.test(code)) return false;
+    const d = Array.from(code, Number);
+    const sum = d.slice(0, 12).reduce((s, n, i) => s + n * (i % 2 ? 3 : 1), 0);
+    return (10 - (sum % 10)) % 10 === d[12];
+  }
+
+  /** OCR sometimes drops the leading 7 of 729…: put it back when the check digit agrees. */
+  function fixBarcode(code) {
+    const c = String(code || '');
+    if (c.length === 12 && c.startsWith('29') && eanValid('7' + c)) return '7' + c;
+    if (c.length === 11 && c.startsWith('9') && eanValid('72' + c)) return '72' + c;
+    return c;
+  }
+
   const WEIGHT_ROW = /ק["״'׳]?ג\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/;
   const UNITS_ROW = /(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*ליחיד/;
   const END_ROW = /לתשלום|שולם|סה["״]?כ/;
+  // Paper receipts: rows that come after the items (VAT, payment, item count).
+  const AFTER_ITEMS = /לתשלום|שולם|סה["״]?כ|מע["״]?מ|חייב|אשראי|מזומן|עודף|פריטים|תשלום/;
 
   function parseHeader(text) {
     const out = {};
     const date = text.match(/תאריך[^\d\n]{0,12}(\d{1,2})\/(\d{1,2})\/(\d{2,4})/) || text.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if (date) {
-      const y = date[3].length === 2 ? `20${date[3]}` : date[3];
-      out.date = `${y}-${date[2].padStart(2, '0')}-${date[1].padStart(2, '0')}`;
+      let y = date[3].length === 2 ? `20${date[3]}` : date[3];
+      const now = new Date();
+      const thisYear = now.getFullYear();
+      // A misread year (2646, 2O26): use this year, or last year if that would be in the future.
+      if (+y < thisYear - 2 || +y > thisYear) {
+        const monthDay = `${date[2].padStart(2, '0')}-${date[1].padStart(2, '0')}`;
+        const today = now.toISOString().slice(5, 10);
+        y = String(monthDay > today ? thisYear - 1 : thisYear);
+      }
+      const m = +date[2], d = +date[1];
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) out.date = `${y}-${date[2].padStart(2, '0')}-${date[1].padStart(2, '0')}`;
     }
-    const time = text.match(/שעה\s*:?\s*(\d{1,2}:\d{2})/);
-    if (time) out.time = time[1];
+    const time = text.match(/שעה\s*:?\s*(\d{1,2}:\d{2})/) || text.match(/(\d{1,2}:\d{2})\s*\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}\/\d{1,2}\/\d{2,4}\s*(\d{1,2}:\d{2})/);
+    if (time) out.time = time[1] || time[2];
     const invoice = text.match(/חשבונית\s*\/?\s*קבלה\s*(\d{6,})/);
     if (invoice) out.invoice = invoice[1];
     const paid = text.match(/סה["״]?כ\s*שולם\s*:?\s*(\d+\.\d{2})/);
@@ -113,28 +154,34 @@
    * Rows (from buildRows) + the full OCR text → the same shape as
    * ReceiptParser.parse(), so the rest of the app doesn't care which chain it was.
    */
-  function parseRows(rows, fullText) {
+  function parseRows(rows, fullText, opts = {}) {
+    const paper = !!opts.paper; // a photo of a paper receipt: stricter, and no reliable header words
     const header = parseHeader(fullText || '');
     const items = [];
     let pending = null; // an item waiting for its quantity row
     let started = false;
+    let endIndex = rows.length;
+    let lastItemRow = -1; // where to look for the total when no "to pay" line was read
+    const minCode = paper ? 4 : 2;
 
     const close = () => {
       if (pending && pending.total != null) items.push(pending);
       pending = null;
     };
 
-    for (const r of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
       const desc = fixTimes(r.desc);
       const amount = parseAmount(r.amount);
       if (!started) {
         if (/קוד|תאור|לתשלום/.test(desc) && /תאור/.test(desc)) started = true; // table header
-        else if (r.code.length >= 2 && amount != null) started = true; // header missed by OCR
+        else if (r.code.length >= minCode && amount != null) started = true; // header missed by OCR
         else continue;
         if (/תאור/.test(desc)) continue;
       }
-      if (END_ROW.test(desc) && !r.code) {
+      if ((paper ? AFTER_ITEMS : END_ROW).test(desc) && r.code.length < minCode) {
         close();
+        endIndex = i;
         break;
       }
 
@@ -159,9 +206,10 @@
         continue;
       }
 
-      if (r.code.length >= 2) {
+      if (r.code.length >= minCode) {
+        lastItemRow = i;
         close();
-        pending = { code: r.code, name: desc, unitPrice: null, qty: 1, total: null, discount: 0, weighted: false };
+        pending = { code: fixBarcode(r.code), name: desc, unitPrice: null, qty: 1, total: null, discount: 0, weighted: false };
         if (amount != null && amount > 0) {
           pending.total = amount;
           pending.unitPrice = amount;
@@ -179,6 +227,23 @@
     }
 
     const sum = round2(items.reduce((s, i) => s + i.total + i.discount, 0));
+
+    // Paper receipts: the "to pay" word is often unreadable, so find the total
+    // among the amounts after the items: one equal to the sum, or one that
+    // repeats (it's printed as the total and again as the payment).
+    if (header.total == null && paper) {
+      const from = endIndex < rows.length ? endIndex : lastItemRow + 1;
+      const after = rows.slice(from).map((r) => parseAmount(r.amount)).filter((a) => a != null && a > 0);
+      const equal = after.find((a) => Math.abs(a - sum) < 0.01);
+      if (equal != null) header.total = equal;
+      else {
+        const counts = new Map();
+        for (const a of after) counts.set(a, (counts.get(a) || 0) + 1);
+        const repeated = Array.from(counts.entries()).filter(([a, n]) => n >= 2 && a >= sum * 0.5).sort((a, b) => b[1] - a[1])[0];
+        if (repeated) header.total = repeated[0];
+      }
+    }
+
     const warnings = [];
     if (!items.length) warnings.push('לא נמצאו מוצרים בקבלה.');
     else if (header.total != null && Math.abs(sum - header.total) > 0.1) {
@@ -187,7 +252,8 @@
     if (!header.date) warnings.push('לא נמצא תאריך קנייה בקבלה.');
 
     return {
-      chain: { id: 'shufersal', name: 'שופרסל' },
+      chain: opts.chain || { id: 'shufersal', name: 'שופרסל' },
+      totalFound: header.total != null,
       date: header.date || null,
       time: header.time || '',
       invoice: header.invoice || '',
@@ -199,7 +265,7 @@
     };
   }
 
-  const api = { buildRows, parseRows, parseAmount, fixTimes, looksLikeShufersal, CODE_FROM, AMOUNT_TO };
+  const api = { buildRows, parseRows, parseAmount, fixTimes, fixBarcode, eanValid, looksLikeShufersal, CODE_FROM, AMOUNT_TO };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Shufersal = api;
 })(typeof window !== 'undefined' ? window : globalThis);

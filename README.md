@@ -25,7 +25,11 @@ Two kinds of receipts are supported:
 - **Yohananof (Weezmo format):** the PDF contains text, which is read directly. Other chains using the same format should work too.
 - **Shufersal:** the PDF is a picture of the receipt, so it's read with OCR ([Tesseract.js](https://github.com/naptha/tesseract.js), free and open source) inside the browser. Nothing is sent to any server. The first time, the browser downloads the OCR engine and the Hebrew language file (a few MB). Screenshots of a receipt work the same way.
 
-For picture receipts the code, description and amount columns are read separately, with digits-only settings for the number columns, which makes barcodes and prices much more reliable.
+- **Photos of paper receipts:** tap the camera button, or pick several photos of one long receipt. Each photo is cleaned in the browser (`js/paper.js`): cropped to the paper, colored print showing through from the back removed, shadows evened out. Then it's read with OCR. Photos are put in shooting order, and lines that appear in two overlapping photos are counted once. Another photo can be added to the same receipt from the review screen.
+
+For picture receipts the code, description and amount columns are read separately, with digits-only settings for the number columns, which makes barcodes and prices much more reliable. On photos, the columns are found from where the prices sit, the barcode is the rightmost number on each line, and an Israeli barcode that lost its leading 7 is repaired using its check digit.
+
+Before saving, every receipt can be reviewed: fix a name or price, remove a line, add a missing one, and compare the lines' sum with the receipt's total. On photos of dot-matrix receipts the Hebrew names often come out garbled. That's expected: the barcode and price are what matter, and each product is named once.
 
 ### How prices and suggestions are calculated
 
@@ -96,6 +100,7 @@ node test/parser.test.js   # receipt parsing
 node test/store.test.js    # prices, frequency, suggestions, totals
 node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 node test/shufersal.test.js  # Shufersal layout from made-up OCR words
+node test/paper.test.js      # photo cleaning, columns, barcodes, several photos
 ```
 
 `test/sample-yohananof.txt` is a made-up receipt in the Weezmo format. Its products, barcodes and prices are fictional.
@@ -109,7 +114,8 @@ node test/shufersal.test.js  # Shufersal layout from made-up OCR words
 | `js/parser.js` | Turns receipt text into product, price and quantity lines |
 | `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
 | `js/ocr.js` | Reads picture receipts (Shufersal, screenshots) with Tesseract.js |
-| `js/shufersal.js` | Turns Shufersal OCR results into receipt lines |
+| `js/shufersal.js` | Turns OCR results (Shufersal, photos) into receipt lines |
+| `js/paper.js` | Photos of paper receipts: cleaning, finding the columns, merging several photos |
 | `js/categories.js` | Store sections and the keyword list used to guess them |
 | `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
 | `js/cloud.js` | Family sharing: Firebase sync, invites and joining |

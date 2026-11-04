@@ -726,3 +726,90 @@ body.has-bar .toast { bottom: calc(160px + env(safe-area-inset-bottom)); }
 }
 
 .remove:hover { background: var(--bg); }
+
+/* ---------- upload: file + camera ---------- */
+.upload-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+
+.upload.camera {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 112px;
+  padding: 14px 8px;
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.upload.camera svg { width: 30px; height: 30px; }
+
+.upload.camera strong { font-size: 15px; line-height: 1.2; }
+
+/* ---------- reviewing a receipt ---------- */
+.panel.review { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+.panel.review > p { margin-bottom: 6px; }
+
+.review-field { display: grid; gap: 4px; margin: 4px 0 6px; }
+
+.review-field label { font-size: 14px; color: var(--muted); }
+
+.review-field input {
+  border: 1.5px solid var(--check);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+}
+
+.add-photo {
+  display: inline-flex;
+  align-self: start;
+  justify-self: start;
+  align-items: center;
+  border: 1.5px dashed var(--accent);
+  color: var(--accent-strong);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.add-photo input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+details.lines { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+
+details.lines > summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
+
+.line-list { list-style: none; margin: 0 0 6px; padding: 0; }
+
+.line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.line-main { min-width: 0; display: grid; gap: 2px; }
+
+.line-name,
+.line-price {
+  width: 100%;
+  min-width: 0;
+  border: 1.5px solid var(--check);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+}
+
+.line-price { text-align: left; font-variant-numeric: tabular-nums; direction: ltr; }
+
+.line-code, .line-qty { font-size: 12.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.line-code { direction: ltr; text-align: right; }
