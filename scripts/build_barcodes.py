@@ -33,7 +33,7 @@ MAX_PAGES = 25
 # Chains publishing through url.publishedprices.co.il (public username, no password)
 CERBERUS = [("yohananof", "יוחננוף"), ("RamiLevi", "רמי לוי")]
 CERBERUS_BASE = "https://url.publishedprices.co.il"
-CERBERUS_FILES = 3  # PriceFull files (branches) per chain
+CERBERUS_FILES = 5  # PriceFull files (branches) per chain
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; kniyot-barcodes/1.0; +https://github.com/mor-the-merrier/shopping-list)"}
 
 errors = []
@@ -95,12 +95,19 @@ def cerberus_files(user):
         CERBERUS_BASE + "/file/json/dir",
         urllib.parse.urlencode({"sSearch": "PriceFull", "iDisplayLength": 100000, "cd": "/", "csrftoken": token}).encode(),
     )
-    files = [row.get("fname", "") for row in json.loads(listing).get("aaData", [])]
-    files = sorted((f for f in files if f.startswith("PriceFull")), reverse=True)  # newest first
+    # Names: PriceFull<chain>-<store>-<yyyymmddhhmm> or PriceFull<chain>-<sub>-<store>-<yyyymmdd>-<hhmmss>
+    dated = []
+    for row in json.loads(listing).get("aaData", []):
+        f = row.get("fname", "")
+        m = re.match(r"PriceFull\d+-(?:\d{3}-)?(\d{3,4})-(\d{8})", f)
+        if m:
+            dated.append((m.group(2), m.group(1), f))
+    dated.sort(reverse=True)  # newest first
+    newest = dated[0][0] if dated else ""
     seen, picked = set(), []
-    for f in files:
-        m = re.match(r"PriceFull\d+-(\d+)-", f)
-        branch = m.group(1) if m else f
+    for date, branch, f in dated:
+        if newest and date < str(int(newest) - 100):  # skip files over ~a month older than the newest
+            continue
         if branch not in seen:
             seen.add(branch)
             picked.append(f)
@@ -145,7 +152,8 @@ def add_file(xml_bytes, names, words):
         for w in re.findall(r"[֐-׿][֐-׿\"'׳״]+", name):
             words[w.strip("\"'")] += 1
         code = code.lstrip("0") if len(code) > 13 else code
-        if len(code) >= 8 and code.isdigit() and not weighted:
+        # National barcodes only. Codes starting with 2 are in-store scale labels.
+        if len(code) >= 8 and code.isdigit() and not (weighted and code.startswith("2")):
             names.setdefault(code, name)
         n += 1
     return n
