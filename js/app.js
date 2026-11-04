@@ -549,7 +549,7 @@
       const score = parsed.items.length * 10 - parsed.warnings.length;
       if (!best || score > best.score) best = { parsed, text, score };
     }
-    showParsed(best.parsed, best.text);
+    improveNames(best.parsed, false).then(() => showParsed(best.parsed, best.text));
   }
 
   function showParsed(parsed, text, extra = {}) {
@@ -558,6 +558,26 @@
     const mismatch = parsed.totalFound !== false && Math.abs(parsed.itemsSum - parsed.total) > 0.1;
     ui.pending.editing = !!extra.photo || mismatch || parsed.totalFound === false;
     render();
+  }
+
+  // ---------- product names (barcode list, your products, OCR fixes) ----------
+  async function improveNames(parsed, fixOcr) {
+    if (!window.ProductNames || !parsed || !parsed.items.length) return parsed;
+    const { codeKey } = window.KniyotStore;
+    const chainId = parsed.chain && parsed.chain.id ? parsed.chain.id : 'unknown';
+    try {
+      await window.ProductNames.improve(parsed.items, {
+        fixOcr,
+        extraWords: store.productList().map((p) => p.name),
+        known: (code) => {
+          const pid = store.state.codeMap[codeKey(chainId, code)];
+          return pid && store.state.products[pid] ? store.state.products[pid].name : null;
+        },
+      });
+    } catch (e) {
+      console.warn('Names not improved', e);
+    }
+    return parsed;
   }
 
   // ---------- reviewing a receipt before saving ----------
@@ -616,7 +636,9 @@
             <div class="line-main">
               <label class="sr-only" for="ln-${i}">שם בשורה ${i + 1}</label>
               <input id="ln-${i}" class="line-name" data-line="${i}" data-field="name" value="${esc(it.name)}" placeholder="שם המוצר" autocomplete="off">
-              ${it.code ? `<span class="line-code">${esc(it.code)}</span>` : ''}${qty}
+              <span class="line-meta">${it.code ? `<span class="line-code">${esc(it.code)}</span>` : ''}${
+                it.nameFrom === 'barcode' ? '<span class="name-from">שם לפי הברקוד</span>' : it.nameFrom === 'yours' ? '<span class="name-from yours">מוצר שכבר שמור אצלך</span>' : ''
+              }${qty}</span>
             </div>
             <label class="sr-only" for="lp-${i}">מחיר בשורה ${i + 1}</label>
             <input id="lp-${i}" class="line-price" data-line="${i}" data-field="total" value="${money(it.total)}" inputmode="decimal" autocomplete="off">
@@ -660,7 +682,7 @@
 
         <details class="lines" ${editing ? 'open' : ''}>
           <summary>בדיקה ותיקון של השורות (${items.length})</summary>
-          ${photo ? '<p class="hint">בצילום השמות יוצאים לפעמים משובשים. זה בסדר: הברקוד והמחיר הם מה שחשוב, ואת השם נותנים פעם אחת בשלב הבא.</p>' : ''}
+          ${photo && items.some((i) => !i.nameFrom || i.nameFrom === 'fixed') ? '<p class="hint">שם שלא נמצא לפי הברקוד נקרא מהצילום, ולפעמים יוצא משובש. אפשר לתקן אותו כאן או בשלב הבא, ופעם אחת מספיקה: בקבלות הבאות המוצר יזוהה לפי הברקוד.</p>' : ''}
           <ul class="line-list">${rowsHtml}</ul>
           <button class="link" data-act="add-line">+ הוספת שורה</button>
         </details>
@@ -714,6 +736,8 @@
     const allParts = (prev ? prev.parts : []).concat(parts);
     const merged = P.mergePhotos(allParts);
     if (keep && keep.date && !merged.date) merged.date = keep.date;
+    progress(1, 'משלים שמות מוצרים');
+    await improveNames(merged, true);
     const storeName = (keep && keep.storeName) || (detected && detected.name) || lastStoreName();
     showParsed(merged, allParts.map((p, i) => `--- צילום ${i + 1} ---\n${p.debug}`).join('\n'), {
       photo: true,
@@ -745,6 +769,7 @@
       if (general.items.length) parsed = general;
     }
     const debug = rows.map((r) => [r.code, r.desc, r.amount].filter(Boolean).join(' | ')).join('\n');
+    await improveNames(parsed, false);
     showParsed(parsed, debug || result.text);
   }
 

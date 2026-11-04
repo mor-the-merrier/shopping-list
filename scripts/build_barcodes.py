@@ -28,8 +28,12 @@ from collections import Counter
 from datetime import datetime, timezone
 
 LISTING = "https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0&page={page}"
-MAX_STORES = 6   # several branches: together they cover nearly the whole assortment
-MAX_PAGES = 4
+MAX_STORES = 10  # several branches: together they cover nearly the whole assortment
+MAX_PAGES = 25
+# Chains publishing through url.publishedprices.co.il (public username, no password)
+CERBERUS = [("yohananof", "יוחננוף"), ("RamiLevi", "רמי לוי")]
+CERBERUS_BASE = "https://url.publishedprices.co.il"
+CERBERUS_FILES = 3  # PriceFull files (branches) per chain
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; kniyot-barcodes/1.0; +https://github.com/mor-the-merrier/shopping-list)"}
 
 errors = []
@@ -67,6 +71,45 @@ def price_file_links():
     return list(links.items())[:MAX_STORES]
 
 
+def cerberus_files(user):
+    """Log in with the chain's public user and download a few PriceFull files."""
+    import http.cookiejar
+    import urllib.parse
+
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def open_(url, data=None):
+        req = urllib.request.Request(url, data=data, headers=HEADERS)
+        with opener.open(req, timeout=90) as r:
+            return r.read()
+
+    def token_of(page):
+        m = re.search(r'name="csrftoken"\s+content="([^"]+)"', page) or re.search(r'csrftoken[^>]*value="([^"]+)"', page)
+        return m.group(1) if m else ""
+
+    token = token_of(open_(CERBERUS_BASE + "/login").decode("utf-8", "replace"))
+    form = urllib.parse.urlencode({"r": "", "username": user, "password": "", "Submit": "Sign in", "csrftoken": token}).encode()
+    token = token_of(open_(CERBERUS_BASE + "/login/user", form).decode("utf-8", "replace")) or token
+    listing = open_(
+        CERBERUS_BASE + "/file/json/dir",
+        urllib.parse.urlencode({"sSearch": "PriceFull", "iDisplayLength": 100000, "cd": "/", "csrftoken": token}).encode(),
+    )
+    files = [row.get("fname", "") for row in json.loads(listing).get("aaData", [])]
+    files = sorted((f for f in files if f.startswith("PriceFull")), reverse=True)  # newest first
+    seen, picked = set(), []
+    for f in files:
+        m = re.match(r"PriceFull\d+-(\d+)-", f)
+        branch = m.group(1) if m else f
+        if branch not in seen:
+            seen.add(branch)
+            picked.append(f)
+        if len(picked) >= CERBERUS_FILES:
+            break
+    for f in picked:
+        yield f, open_(CERBERUS_BASE + "/file/d/" + urllib.parse.quote(f))
+
+
 def unpack(blob):
     """Price files are gzip, sometimes zip, sometimes plain XML."""
     if blob[:2] == b"\x1f\x8b":
@@ -95,29 +138,38 @@ def clean_name(name):
     return name
 
 
+def add_file(xml_bytes, names, words):
+    n = 0
+    for code, name, weighted in items_of(xml_bytes):
+        name = clean_name(name)
+        for w in re.findall(r"[֐-׿][֐-׿\"'׳״]+", name):
+            words[w.strip("\"'")] += 1
+        code = code.lstrip("0") if len(code) > 13 else code
+        if len(code) >= 8 and code.isdigit() and not weighted:
+            names.setdefault(code, name)
+        n += 1
+    return n
+
+
 def main(out_dir):
     names = {}
     words = Counter()
     stores = []
     for store, url in price_file_links():
         try:
-            xml_bytes = unpack(get(url))
-            n = 0
-            for code, name, weighted in items_of(xml_bytes):
-                name = clean_name(name)
-                for w in re.findall(r"[֐-׿][֐-׿\"'׳״]+", name):
-                    words[w.strip("\"'")] += 1
-                code = code.lstrip("0") if len(code) > 13 else code
-                if len(code) >= 8 and code.isdigit() and not weighted:
-                    names.setdefault(code, name)
-                n += 1
-            stores.append({"store": store, "items": n})
+            stores.append({"chain": "שופרסל", "store": store, "items": add_file(unpack(get(url)), names, words)})
         except Exception as e:
-            errors.append(f"store {store}: {e}")
+            errors.append(f"shufersal store {store}: {e}")
+    for user, chain in CERBERUS:
+        try:
+            for fname, blob in cerberus_files(user):
+                stores.append({"chain": chain, "file": fname, "items": add_file(unpack(blob), names, words)})
+        except Exception as e:
+            errors.append(f"{chain}: {type(e).__name__}: {e}")
 
     meta = {
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": "Shufersal public price files (Price Transparency regulations)",
+        "source": "Supermarket chains' public price files (Price Transparency regulations)",
         "stores": stores,
         "barcodes": len(names),
         "words": 0,
