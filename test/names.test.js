@@ -39,7 +39,7 @@ const N = require('../js/names.js');
     items.map((i) => [i.name, i.nameFrom]),
     [
       ['גבינת פקורינו', 'barcode'],
-      ['שמנת לבישול 15%', 'fixed'],
+      ['שמנת לבישול', 'fixed'],
       ['לחם אחיד', 'yours'],
       ['חומוס גרעינים', 'fixed'],
     ]
