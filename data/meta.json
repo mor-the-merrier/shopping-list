@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-04T10:45:02Z",
+  "updated": "2026-11-04T13:40:29Z",
   "source": "Supermarket chains' public price files (Price Transparency regulations)",
   "stores": [
     {
@@ -105,5 +105,6 @@
   ],
   "barcodes": 32820,
   "words": 8799,
-  "errors": []
+  "errors": [],
+  "prices": 30373
 }
