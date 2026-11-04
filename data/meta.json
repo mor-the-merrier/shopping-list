@@ -1,0 +1,17 @@
+{
+  "updated": "2026-11-04T10:17:35Z",
+  "source": "Shufersal public price files (Price Transparency regulations)",
+  "stores": [
+    {
+      "store": "001",
+      "items": 6551
+    },
+    {
+      "store": "002",
+      "items": 8131
+    }
+  ],
+  "barcodes": 8149,
+  "words": 3566,
+  "errors": []
+}
