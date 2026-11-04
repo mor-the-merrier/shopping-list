@@ -11,6 +11,7 @@
     tab: 'list',
     expanded: null, // list item id with open details
     pending: null, // { parsed, duplicate, text }
+    shots: [], // photos of one paper receipt taken so far, read together: [{ file, url }]
     unknown: null, // codes waiting to be named after a save
     productQuery: '',
     editing: null, // product id being renamed
@@ -539,6 +540,8 @@
              </section>`
           : ui.pending
           ? ''
+          : ui.shots.length
+          ? shotsPanelHtml()
           : `<div class="upload-row">
                <label class="upload">
                  <input type="file" id="pdfInput" accept="application/pdf,.pdf,image/*" multiple>
@@ -689,10 +692,17 @@
                  <label for="storeInput">החנות</label>
                  <input id="storeInput" value="${esc(storeName || '')}" placeholder="למשל סופר כח" list="storeNames" autocomplete="off">
                </div>
-               <label class="add-photo">
-                 <input type="file" id="photoAppend" accept="image/*" multiple>
-                 <span>+ הוספת צילום להמשך הקבלה</span>
-               </label>`
+               <div class="add-photo-row">
+                 <span>חסר את המשך הקבלה?</span>
+                 <label class="add-photo">
+                   <input type="file" id="photoAppendCamera" accept="image/*" capture="environment">
+                   <span>+ צילום</span>
+                 </label>
+                 <label class="add-photo">
+                   <input type="file" id="photoAppend" accept="image/*" multiple>
+                   <span>+ מהגלריה</span>
+                 </label>
+               </div>`
             : ''
         }
 
@@ -726,9 +736,46 @@
       <datalist id="storeNames">${(window.PaperReceipt ? window.PaperReceipt.KNOWN : []).map((k) => `<option value="${esc(k.name)}"></option>`).join('')}</datalist>`;
   }
 
+  const CAMERA_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>';
+
+  /** Photos taken so far of one receipt: take another, or read them all. */
+  function shotsPanelHtml() {
+    const n = ui.shots.length;
+    return `
+      <section class="panel shots">
+        <h3>${n === 1 ? 'צילום אחד' : `${n} צילומים`} של הקבלה</h3>
+        <p class="hint">קבלה ארוכה? מצלמים אותה בחלקים, מלמעלה למטה, וכל צילום ממשיך מאיפה שהקודם נגמר (שורה או שתיים שמופיעות פעמיים נספרות פעם אחת). מקרוב, כך שהספרות ברורות.</p>
+        <ol class="shot-strip">
+          ${ui.shots
+            .map(
+              (s, i) => `<li>
+                <img src="${s.url}" alt="צילום ${i + 1}">
+                <span class="shot-num">${i + 1}</span>
+                <button class="shot-remove" data-shot-remove="${i}" aria-label="הסרת צילום ${i + 1}">×</button>
+              </li>`
+            )
+            .join('')}
+        </ol>
+        <div class="actions">
+          <label class="btn secondary shot-more">
+            <input type="file" id="shotMore" accept="image/*" capture="environment">
+            ${CAMERA_ICON}
+            צילום נוסף
+          </label>
+          <button class="btn" data-act="read-shots">קריאת הקבלה</button>
+        </div>
+        <button class="link" data-act="shots-cancel">ביטול</button>
+      </section>`;
+  }
+
+  function clearShots() {
+    for (const s of ui.shots) URL.revokeObjectURL(s.url);
+    ui.shots = [];
+  }
+
   /** Photos of a paper receipt: read each, merge them, open the review. */
-  async function readPhotos(files, append = false) {
-    const list = Array.from(files).sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0)); // shooting order
+  async function readPhotos(files, append = false, opts = {}) {
+    const list = opts.keepOrder ? Array.from(files) : Array.from(files).sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0)); // shooting order
     const prev = append && ui.pending && ui.pending.photo ? ui.pending : null;
     const keep = prev ? { storeName: prev.storeName, date: prev.parsed.date } : null;
     ui.ocr = { progress: 0, label: 'מכין את התמונה' };
@@ -767,6 +814,7 @@
     if (keep && keep.date && !merged.date) merged.date = keep.date;
     progress(1, 'משלים שמות מוצרים');
     await improveNames(merged, true);
+    ui.ocr = null;
     const storeName = (keep && keep.storeName) || (detected && detected.name) || lastStoreName();
     showParsed(merged, allParts.map((p, i) => `--- צילום ${i + 1} ---\n${p.debug}`).join('\n'), {
       photo: true,
@@ -1250,6 +1298,22 @@
     } else if (t.dataset.act === 'cancel') {
       ui.pending = null;
       render();
+    } else if (t.dataset.shotRemove != null) {
+      const [gone] = ui.shots.splice(+t.dataset.shotRemove, 1);
+      if (gone) URL.revokeObjectURL(gone.url);
+      render();
+    } else if (t.dataset.act === 'shots-cancel') {
+      clearShots();
+      render();
+    } else if (t.dataset.act === 'read-shots') {
+      // in the order they were taken (not by file date: the camera may not set one)
+      const files = ui.shots.map((s) => s.file);
+      clearShots();
+      readPhotos(files, false, { keepOrder: true }).catch((err) => {
+        console.error(err);
+        render();
+        toast(err.message || 'לא הצלחתי לקרוא את הצילום');
+      });
     } else if (t.dataset.askDelete) {
       ui.confirmDelete = t.dataset.askDelete;
       render();
@@ -1339,9 +1403,16 @@
       toast(`הועבר למחלקה: ${window.KniyotCategories.BY_ID[e.target.value].name}`);
       return;
     }
-    if ((e.target.id === 'cameraInput' || e.target.id === 'photoAppend') && e.target.files.length) {
+    // the camera: collect shots of one receipt, read them together
+    if ((e.target.id === 'cameraInput' || e.target.id === 'shotMore') && e.target.files.length) {
+      for (const file of e.target.files) ui.shots.push({ file, url: URL.createObjectURL(file) });
+      e.target.value = '';
+      render();
+      return;
+    }
+    if ((e.target.id === 'photoAppend' || e.target.id === 'photoAppendCamera') && e.target.files.length) {
       const files = Array.from(e.target.files);
-      const append = e.target.id === 'photoAppend';
+      const append = true;
       e.target.value = '';
       try {
         await readPhotos(files, append);

@@ -173,4 +173,123 @@ assert.strictEqual(r4.date, `${thisYear}-01-01`);
   assert.ok(parsed.warnings.some((w) => /לא תואם/.test(w)), 'mismatch flagged');
 }
 
+
+// ---------- a long receipt: quantity lines, produce codes, glued barcodes, split payment ----------
+{
+  // [code-strip reading, name, amount, middle reading]
+  const lines = [
+    ['', 'קוד תאור לתשלום', '', ''],
+    ['7290000000015', 'מגבות נייר', '12.9', ''], // last 0 too faint: "12.9"
+    ['117177290000000039', 'יוגורט 125ג', '', ''], // the name's "125" stuck to the barcode
+    ['', 'ליחידה', '26.00', '6.50x4'],
+    ['', 'יוגורט', '-4.00', ''],
+    ['729000000004', 'לחם', '7.50', ''], // last digit lost at the paper's edge
+    ['964775', 'בננה', '', ''],
+    ['', 'לק"ג', '11.92', '.90x221.205'], // "9.90 x ק"ג 1.205": the price lost a digit, ק"ג read as "22"
+    ['22', 'עגבניה', '', ''], // a 2-digit produce code, trusted because a weight line follows
+    ['', 'לק"ג', '4.49', '6.90x120.650'],
+    ['', 'להצלוו', '58.81', ''], // "לתשלום" in double-width letters, unreadable
+    ['', 'ע. סודקסו', '20.00', ''],
+    ['02101', 'ישראכרט', '38.81', ''], // a payment line that looks like an item
+  ];
+  const words = [], codeWords = [], amountWords = [], midWords = [];
+  let y = 300;
+  for (const [code, name, amount, mid] of lines) {
+    const box = (x0, x1) => ({ x0, y0: y, x1, y1: y + 70 });
+    if (code) codeWords.push({ text: code, bbox: box(1860 - code.length * 32, 1860) });
+    if (mid) midWords.push({ text: mid, bbox: box(1100, 1100 + mid.length * 32) });
+    let right = 1300;
+    for (const w of name.split(' ')) {
+      words.push({ text: w, bbox: box(right - w.length * 30, right) });
+      right -= w.length * 30 + 20;
+    }
+    if (amount) {
+      amountWords.push({ text: amount, bbox: box(520 - amount.length * 34, 520) });
+      words.push({ text: amount, bbox: box(520 - amount.length * 34, 520) });
+    }
+    y += 85;
+  }
+  // a smudge made one price's box two lines tall: it still lands on its own line
+  amountWords[2].bbox.y1 += 90;
+  const c = P.findColumns(words, W);
+  const rows = S.buildRows({ words, codeWords, amountWords, midWords, width: W, codeFrom: c.codeFrom, amountTo: c.amountTo });
+  const r = S.parseRows(rows, 'יוניברס', { paper: true, chain: { id: 'unknown', name: '' } });
+  assert.deepStrictEqual(
+    r.items.map((i) => [i.code, i.qty, i.weighted, i.total, i.discount]),
+    [
+      ['7290000000015', 1, false, 12.9, 0],
+      ['7290000000039', 4, false, 26, -4],
+      ['7290000000046', 1, false, 7.5, 0],
+      ['964775', 1.205, true, 11.92, 0],
+      ['22', 0.65, true, 4.49, 0],
+    ]
+  );
+  assert.strictEqual(r.items[3].unitPrice, 9.89, 'price per kg from the amount and the weight');
+  assert.strictEqual(r.items[1].unitPrice, 6.5);
+  assert.strictEqual(r.total, 58.81, 'the total is the line the payments below add up to');
+  assert.strictEqual(r.totalFound, true);
+}
+
+// overlap between two photos, with one line read differently in each
+{
+  const it = (code, total) => ({ code, total, discount: 0, name: '', qty: 1 });
+  const a = { items: [it('111111', 5), it('7290000000015', 12.9), it('7290000000039', 26), it('', 4.49), it('7290000000046', 7.5)], date: '2026-11-01', totalFound: false };
+  const b = { items: [it('7290000000015', 12.9), it('7290000000039', 26), it('', 4.46), it('7290000000046', 7.5), it('222222', 3)], totalFound: true, total: 58.89 };
+  const m = P.mergePhotos([a, b]);
+  assert.strictEqual(m.overlapDropped, 4, 'four lines seen twice');
+  assert.deepStrictEqual(m.items.map((i) => i.total), [5, 12.9, 26, 4.49, 7.5, 3]);
+
+  // the first photo missed a line in the overlap: the second photo's reading is kept
+  const c = { items: [it('111111', 5), it('7290000000015', 12.9), it('', 4.49), it('7290000000046', 7.5)], date: '2026-11-01' };
+  const d = { items: [it('7290000000015', 12.9), it('7290000000039', 26), it('', 4.49), it('7290000000046', 7.5), it('222222', 3)] };
+  const m2 = P.mergePhotos([c, d]);
+  assert.deepStrictEqual(m2.items.map((i) => i.total), [5, 12.9, 26, 4.49, 7.5, 3]);
+  assert.strictEqual(m2.overlapDropped, 3);
+
+  // no overlap: everything kept
+  const m3 = P.mergePhotos([c, { items: [it('333333', 9), it('444444', 1)] }]);
+  assert.strictEqual(m3.items.length, 6);
+  assert.strictEqual(m3.overlapDropped, 0);
+}
+
+// helpers for these
+assert.strictEqual(S.pickCode('117177290000000039'), '7290000000039');
+assert.strictEqual(S.pickCode('7290000000039'), '7290000000039');
+assert.strictEqual(S.pickCode('283642'), '283642');
+assert.strictEqual(S.pickCode('11217121210202'), '1210202', 'no barcode inside: the right-aligned end');
+assert.strictEqual(S.fixBarcode('729000000003'), '7290000000039', 'lost check digit restored');
+assert.strictEqual(S.parseAmount('19.9'), 19.9);
+assert.strictEqual(S.parseAmount('13.907'), 13.9);
+assert.deepStrictEqual(S.midQuantity('6.50x4', 26), { qty: 4, unitPrice: 6.5, weighted: false, total: 26 });
+assert.strictEqual(S.midQuantity('85.00x220.258', 21.93).qty, 0.258);
+assert.strictEqual(S.midQuantity('5.20', 5.2), null, 'a price alone is not a quantity line');
+
+// ---------- a curled receipt: lines levelled ----------
+{
+  const w = 800, h = 600;
+  const gray = new Uint8ClampedArray(w * h).fill(255);
+  // text lines (dashes of ink) that drop 3° toward the right
+  const t = Math.tan((3 * Math.PI) / 180);
+  for (let line = 0; line < 8; line++) {
+    for (let x = 40; x < w - 40; x++) {
+      if (x % 40 > 30) continue; // gaps between "words"
+      const yc = 60 + line * 64 + (x - w / 2) * t;
+      for (let dy = -8; dy <= 8; dy++) {
+        const yy = Math.round(yc + dy);
+        if (yy >= 0 && yy < h) gray[yy * w + x] = 0;
+      }
+    }
+  }
+  const skew = P.estimateSkew(gray, w, h);
+  assert.ok(Math.abs(skew - 3) <= 0.5, 'tilt measured: ' + skew);
+  const { images } = P.levelLines([gray], w, h, 300);
+  // after levelling, a line's ink is at the same height on the left and the right
+  const inkAt = (img, x) => {
+    for (let y = 30; y < 140; y++) if (img[y * w + x] < 128) return y;
+    return -1;
+  };
+  assert.ok(Math.abs(inkAt(images[0], 100) - inkAt(images[0], 690)) <= 4, `level: ${inkAt(images[0], 100)} vs ${inkAt(images[0], 690)}`);
+  assert.ok(Math.abs(inkAt(gray, 100) - inkAt(gray, 690)) > 20, 'it was tilted before');
+}
+
 console.log(`OK: paper receipts (cleaning, columns, ${merged.items.length} items over 2 photos, overlap dropped)`);

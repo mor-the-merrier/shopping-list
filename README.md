@@ -26,9 +26,21 @@ Two kinds of receipts are supported:
 - **Yohananof (Weezmo format):** the PDF contains text, which is read directly. Other chains using the same format should work too.
 - **Shufersal:** the PDF is a picture of the receipt, so it's read with OCR ([Tesseract.js](https://github.com/naptha/tesseract.js), free and open source) inside the browser. Nothing is sent to any server. The first time, the browser downloads the OCR engine and the Hebrew language file (a few MB). Screenshots of a receipt work the same way.
 
-- **Photos of paper receipts:** tap the camera button, or pick several photos of one long receipt. Each photo is cleaned in the browser (`js/paper.js`): cropped to the paper, colored print showing through from the back removed, shadows evened out. Then it's read with OCR. The total is read from below the items: many receipts print it in double-height digits next to "לתשלום", so that line is found, squashed to normal proportions and read on its own (twice, at two sizes, preferring a reading that matches the lines' sum or the payment line). Photos are put in shooting order, and lines that appear in two overlapping photos are counted once. Another photo can be added to the same receipt from the review screen.
+- **Photos of paper receipts:** tap the camera button. A long receipt can be shot in parts: after each photo, take another ("צילום נוסף") from where the last one ended, then read them all together ("קריאת הקבלה"). Closer photos read much better than one photo of the whole receipt. Several photos can also be picked from the gallery, and another photo can be added from the review screen (camera or gallery).
 
-For picture receipts the code, description and amount columns are read separately, with digits-only settings for the number columns, which makes barcodes and prices much more reliable. On photos, the columns are found from where the prices sit, the barcode is the rightmost number on each line, and an Israeli barcode that lost its leading 7 is repaired using its check digit.
+  Each photo is cleaned in the browser (`js/paper.js`): cropped to the paper, colored print showing through from the back removed, shadows evened out, and every text line levelled. A receipt curls, so the tilt is measured separately down the page (by how far neighbouring vertical bands of the page see the same lines shifted) and each part is straightened on its own. Then it's read with OCR.
+
+  The total is read from the "לתשלום" line. Many receipts print it in double-height digits, so that line is found, squashed to normal proportions and read on its own (twice, at two sizes, preferring a reading that matches the lines' sum or the payment line). When the word itself is unreadable (wide letters often are), the total is the first line after the items that the payment lines below it add up to (200.00 + 265.75 = 465.75).
+
+  Photos are put in shooting order. Where two photos overlap, the repeated lines are matched (allowing a line that only one photo caught) and counted once.
+
+For picture receipts the code, description and amount columns are read separately, with digits-only settings for the number columns, which makes barcodes and prices much more reliable. On photos:
+
+- the columns are found from where the prices sit, and the barcode is the rightmost number on each line;
+- digits from the end of a name that stick to a barcode are cut off (an Israeli barcode, 729 and ten more digits, is picked out by its check digit), a lost leading 7 or a lost last digit is restored using the check digit;
+- quantity and weight lines ("6.50 x 4 ליחידה", "ק"ג 0.258 x 85.00") are read from the middle of the line as digits; the weight has three decimals, and the line's amount gives the price per kilo;
+- produce with a short in-store code ("22") counts as an item only when a weight or quantity line follows it;
+- a price whose last zero was too faint ("19.9") or whose point was missed ("4990") is completed.
 
 Before saving, every receipt can be reviewed: fix a name or price, remove a line, add a missing one, and compare the lines' sum with the receipt's total. On photos of dot-matrix receipts the Hebrew names often come out garbled. That's expected: the barcode and price are what matter, and each product is named once.
 
@@ -109,7 +121,7 @@ node test/parser.test.js   # receipt parsing
 node test/store.test.js    # prices, frequency, suggestions, totals
 node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 node test/shufersal.test.js  # Shufersal layout from made-up OCR words
-node test/paper.test.js      # photo cleaning, columns, barcodes, several photos
+node test/paper.test.js      # photo cleaning, levelling, columns, barcodes, quantity lines, totals, several photos
 node test/names.test.js      # names: barcode list, your products, OCR fixes
 ```
 
@@ -120,14 +132,14 @@ node test/names.test.js      # names: barcode list, your products, OCR fixes
 | File | Contents |
 |---|---|
 | `index.html` | Page skeleton |
-| `css/style.css` | Styles, including dark mode |
+| `css/style.css` | Styles (light only) |
 | `js/parser.js` | Turns receipt text into product, price and quantity lines |
 | `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
 | `js/ocr.js` | Reads picture receipts (Shufersal, screenshots) with Tesseract.js |
 | `js/shufersal.js` | Turns OCR results (Shufersal, photos) into receipt lines |
 | `js/names.js` | Product names: your products, the barcode list, OCR-aware word fixes |
 | `scripts/build_barcodes.py` | Builds `data/barcodes.json` from the chains' public price files (run by the weekly Action) |
-| `js/paper.js` | Photos of paper receipts: cleaning, finding the columns, merging several photos |
+| `js/paper.js` | Photos of paper receipts: cleaning, levelling, finding the columns and the total, merging several photos |
 | `js/categories.js` | Store sections and the keyword list used to guess them |
 | `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
 | `js/cloud.js` | Family sharing: Firebase sync, invites and joining |

@@ -225,11 +225,14 @@
 
     const data = wctx.getImageData(0, 0, work.width, work.height).data;
     const clean = P.cleanForOcr(data, work.width, work.height);
+    // a curled or tilted receipt: level every text line (OCR reads rows)
+    const level = P.levelLines ? P.levelLines([clean.text, clean.digits], work.width, work.height) : { images: [clean.text, clean.digits], angles: [] };
     return {
-      text: grayCanvas(clean.text, work.width, work.height),
-      digits: grayCanvas(clean.digits, work.width, work.height),
+      text: grayCanvas(level.images[0], work.width, work.height),
+      digits: grayCanvas(level.images[1], work.width, work.height),
       width: work.width,
       height: work.height,
+      skew: level.angles,
     };
   }
 
@@ -309,12 +312,14 @@
         const cols = root.PaperReceipt.findColumns(words, img.width);
 
         stage = 1;
-        await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.' });
+        // the right side as digits: barcodes, and the "6.50 x 4" / weight lines in the middle
+        await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.x' });
         const r2 = await digits.recognize(strip(img.digits, cols.codeFrom, img.width));
 
         stage = 2;
+        // prices: the thickened copy closes the gaps in dot-matrix zeros
         await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.-' });
-        const r3 = await digits.recognize(strip(img.text, 0, cols.amountTo));
+        const r3 = await digits.recognize(strip(img.digits, 0, cols.amountTo));
 
         // the total is often printed big and centered next to "לתשלום", outside the price column
         stage = 3;
@@ -344,6 +349,7 @@
           text: r1.data.text || '',
           words,
           codeWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
+          midWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
           amountWords: unstrip(wordsOf(r3.data, 0), 0),
           footerWords,
           bigTotal,

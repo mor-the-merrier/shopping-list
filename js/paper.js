@@ -129,6 +129,99 @@
     return { text, digits };
   }
 
+  /**
+   * How tilted the text is, in degrees (positive: lines go down to the right).
+   * The page is cut into narrow vertical bands; neighbouring bands see the same
+   * text lines a few pixels higher or lower, and that shift over the distance
+   * between them is the tilt. Comparing near bands only keeps a shift well
+   * under one line, so a line is never matched with the next one.
+   */
+  function estimateSkew(gray, width, height, maxDeg = 4) {
+    const BANDS = 12;
+    const bw = width / BANDS;
+    const profiles = [];
+    for (let b = 0; b < BANDS; b++) {
+      const x0 = Math.round(b * bw), x1 = Math.round((b + 1) * bw);
+      const prof = new Float64Array(height);
+      let ink = 0;
+      for (let y = 0; y < height; y++) {
+        let c = 0;
+        for (let x = x0; x < x1; x += 2) if (gray[y * width + x] < 128) c++;
+        prof[y] = c;
+        ink += c;
+      }
+      // a band that's almost all ink is the paper's edge or a shadow, not text
+      const share = ink / (height * ((x1 - x0) / 2));
+      profiles.push(share > 0.01 && share < 0.4 ? prof : null);
+    }
+    const angles = [];
+    for (let i = 0; i < BANDS; i++) {
+      for (const j of [i + 1, i + 2]) {
+        if (j >= BANDS || !profiles[i] || !profiles[j]) continue;
+        const d = (j - i) * bw;
+        const max = Math.ceil(d * Math.tan((maxDeg * Math.PI) / 180));
+        const A = profiles[i], B = profiles[j];
+        let best = 0, bestScore = -1;
+        for (let s = -max; s <= max; s++) {
+          let score = 0;
+          for (let y = Math.max(0, -s); y < height && y + s < height; y++) score += A[y] * B[y + s];
+          if (score > bestScore) {
+            bestScore = score;
+            best = s;
+          }
+        }
+        angles.push((Math.atan(best / d) * 180) / Math.PI);
+      }
+    }
+    if (angles.length < 3) return 0;
+    angles.sort((a, b) => a - b);
+    return Math.round(angles[Math.floor(angles.length / 2)] * 10) / 10;
+  }
+
+  /**
+   * A receipt is rarely flat: it curls, so the tilt changes down the page.
+   * Measure the tilt in overlapping slabs and shift each column up or down so
+   * every text line is level. Returns { images: [levelled copies], angles }.
+   */
+  function levelLines(images, width, height, slab = 400) {
+    const ref = images[0];
+    const centers = [], angles = [];
+    for (let y0 = 0; y0 < height; y0 += slab / 2) {
+      const h = Math.min(slab, height - y0);
+      if (h < slab / 2) break;
+      centers.push(y0 + h / 2);
+      angles.push(estimateSkew(ref.subarray(y0 * width, (y0 + h) * width), width, h));
+    }
+    // smooth: a single slab that disagrees with both neighbours is noise
+    const smooth = angles.map((a, i) => {
+      const n = [angles[i - 1], a, angles[i + 1]].filter((v) => v != null).sort((p, q) => p - q);
+      return n[Math.floor(n.length / 2)];
+    });
+    if (!smooth.length || smooth.every((a) => Math.abs(a) < 0.3)) return { images, angles: smooth };
+    const tanAt = (y) => {
+      if (y <= centers[0]) return Math.tan((smooth[0] * Math.PI) / 180);
+      for (let i = 1; i < centers.length; i++) {
+        if (y <= centers[i]) {
+          const f = (y - centers[i - 1]) / (centers[i] - centers[i - 1]);
+          return Math.tan(((smooth[i - 1] * (1 - f) + smooth[i] * f) * Math.PI) / 180);
+        }
+      }
+      return Math.tan((smooth[smooth.length - 1] * Math.PI) / 180);
+    };
+    const cx = width / 2;
+    const out = images.map(() => new Uint8ClampedArray(width * height).fill(255));
+    for (let y = 0; y < height; y++) {
+      const t = tanAt(y);
+      for (let x = 0; x < width; x++) {
+        const sy = Math.round(y + t * (x - cx));
+        if (sy < 0 || sy >= height) continue;
+        const from = sy * width + x, to = y * width + x;
+        for (let k = 0; k < images.length; k++) out[k][to] = images[k][from];
+      }
+    }
+    return { images: out, angles: smooth };
+  }
+
   // ---------- 2. columns ----------
 
   const AMOUNT = /^-?\d{1,4}[.,]\d{2}-?$/;
@@ -315,6 +408,7 @@
   // ---------- store name ----------
 
   const KNOWN = [
+    { id: 'yuniverse', name: 'יוניברס', match: /יוניבר[סם]/ }, // a Shufersal franchise: its receipts say שופרסל too
     { id: 'shufersal', name: 'שופרסל', match: /שופרסל/ },
     { id: 'rami-levy', name: 'רמי לוי', match: /רמי\s*לוי/ },
     { id: 'yohananof', name: 'יוחננוף', match: /יוחננוף/ },
@@ -359,8 +453,52 @@
   // ---------- 3. several photos ----------
 
   const round2 = (n) => Math.round(n * 100) / 100;
+  // The same line seen in two photos may read a little differently: the same
+  // barcode is enough, or the same price when one of the barcodes didn't read.
   const sameLine = (a, b) =>
-    Math.abs(a.total - b.total) < 0.01 && (a.code && b.code ? a.code === b.code : true);
+    (a.code && a.code.length >= 4 && a.code === b.code) ||
+    (Math.abs(a.total - b.total) < 0.01 && (a.code && b.code ? a.code === b.code : true));
+
+  /**
+   * Where the next photo starts repeating the end of what we have: the last
+   * line so far appears as line `to` of the next photo, and the lines before
+   * it mostly match too (a line one photo missed is allowed).
+   * Returns { from, to, matches } or null.
+   */
+  function findOverlap(items, next) {
+    if (!items.length || !next.length) return null;
+    const N = 10;
+    const T = items.slice(-N);
+    const base = items.length - T.length;
+    let best = null;
+    for (let j = 0; j < Math.min(N, next.length); j++) {
+      if (!sameLine(T[T.length - 1], next[j])) continue;
+      const H = next.slice(0, j + 1);
+      // longest common subsequence, ending with both last lines
+      const L = Array.from({ length: T.length + 1 }, () => new Array(H.length + 1).fill(0));
+      for (let x = 1; x <= T.length; x++)
+        for (let y = 1; y <= H.length; y++)
+          L[x][y] = sameLine(T[x - 1], H[y - 1]) ? L[x - 1][y - 1] + 1 : Math.max(L[x - 1][y], L[x][y - 1]);
+      const matches = L[T.length][H.length];
+      // where the matched stretch starts in what we have
+      let x = T.length, y = H.length, start = T.length - 1;
+      while (x > 0 && y > 0) {
+        if (sameLine(T[x - 1], H[y - 1]) && L[x][y] === L[x - 1][y - 1] + 1) {
+          start = x - 1;
+          x--;
+          y--;
+        } else if (L[x - 1][y] >= L[x][y - 1]) x--;
+        else y--;
+      }
+      const span = Math.max(T.length - start, H.length);
+      // most of the stretch must match: no more than one line in four unmatched
+      if (matches < span - Math.floor(span / 4) - (span >= 3 ? 1 : 0)) continue;
+      // one line alone counts only when its barcode matches
+      if (matches === 1 && !(T[T.length - 1].code && T[T.length - 1].code.length >= 4)) continue;
+      if (!best || matches > best.matches) best = { from: base + start, to: j, matches };
+    }
+    return best;
+  }
 
   /**
    * Parsed photos (in shooting order) → one receipt.
@@ -379,18 +517,18 @@
     let dropped = 0;
     for (const part of ordered) {
       const next = part.items;
-      // largest k where the last k lines so far equal the first k of this photo
-      let overlap = 0;
-      for (let k = Math.min(items.length, next.length, 8); k > 0; k--) {
-        let ok = true;
-        for (let j = 0; j < k && ok; j++) ok = sameLine(items[items.length - k + j], next[j]);
-        if (ok) {
-          overlap = k;
-          break;
-        }
+      const o = findOverlap(items, next);
+      if (!o) {
+        items.push(...next.map((it) => Object.assign({}, it)));
+        continue;
       }
-      dropped += overlap;
-      items.push(...next.slice(overlap).map((it) => Object.assign({}, it)));
+      // The overlapping stretch was read twice: keep the reading with more
+      // lines (one photo may have missed a line the other caught).
+      const mine = items.slice(o.from);
+      const theirs = next.slice(0, o.to + 1);
+      items.splice(o.from, mine.length, ...(theirs.length > mine.length ? theirs : mine).map((it) => Object.assign({}, it)));
+      items.push(...next.slice(o.to + 1).map((it) => Object.assign({}, it)));
+      dropped += Math.min(mine.length, theirs.length);
     }
 
     const first = ordered[0];
@@ -414,7 +552,7 @@
     });
   }
 
-  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, findColumns, findTotal, applyTotal, lineBands, bigTotalBox, detectStore, storeFromName, mergePhotos, KNOWN };
+  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, estimateSkew, levelLines, findColumns, findTotal, applyTotal, lineBands, bigTotalBox, detectStore, storeFromName, mergePhotos, KNOWN };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaperReceipt = api;
 })(typeof window !== 'undefined' ? window : globalThis);
