@@ -165,6 +165,25 @@
     return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SECTION_ICONS[id] || SECTION_ICONS.other}</svg>`;
   }
 
+  /** "×2" next to an item's name. */
+  function qtyBadge(item) {
+    return item.qty > 1 ? ` <span class="qty-badge" dir="ltr" aria-label="כמות ${item.qty}">×${item.qty}</span>` : '';
+  }
+
+  /** − n + inside an item's details. */
+  function qtyStepper(item) {
+    const n = item.qty || 1;
+    return `
+      <div class="qty-row">
+        <span class="qty-label" id="qtyl-${item.id}">כמות</span>
+        <div class="stepper" role="group" aria-labelledby="qtyl-${item.id}">
+          <button data-act="qty-dec" aria-label="פחות" ${n <= 1 ? 'disabled' : ''}>−</button>
+          <output aria-live="polite">${n}</output>
+          <button data-act="qty-inc" aria-label="עוד אחד">+</button>
+        </div>
+      </div>`;
+  }
+
   /** "מחלקה" picker inside an item's details on the list. */
   function sectionPicker(item) {
     const current = store.categoryOfItem(item);
@@ -228,9 +247,10 @@
       <li class="item${item.checked ? ' done' : ''}${isLast ? ' last' : ''}" data-id="${item.id}">
         <div class="row">
           <button class="check" data-act="toggle" aria-label="${item.checked ? 'ביטול סימון' : 'סימון'} ${esc(item.name)}" aria-pressed="${item.checked}">${ICON_CHECK}</button>
-          <button class="name" data-act="toggle">${esc(item.name)}</button>
+          <button class="name" data-act="expand" aria-expanded="${ui.expanded === item.id}">${esc(item.name)}${qtyBadge(item)}</button>
           <button class="remove" data-act="remove-item" aria-label="מחיקת ${esc(item.name)}">×</button>
         </div>
+        ${ui.expanded === item.id ? `<div class="detail">${qtyStepper(item)}</div>` : ''}
       </li>`;
 
     const editHtml = ui.editingList
@@ -304,6 +324,7 @@
           const unit = stats.weighted ? ' לק״ג' : '';
           detail = `
             <div class="detail">
+              ${qtyStepper(item)}
               <dl class="facts">
                 <dt>מחיר רגיל</dt><dd>₪${money(stats.usualPrice)}${unit}</dd>
                 ${stats.maxPrice - stats.minPrice > 0.01 ? `<dt>טווח</dt><dd>₪${money(stats.minPrice)} עד ₪${money(stats.maxPrice)}</dd>` : ''}
@@ -320,10 +341,15 @@
               ${sectionPicker(item)}
             </div>`;
         } else {
-          detail = `<div class="detail"><p class="detail-note">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</p>${sectionPicker(item)}</div>`;
+          detail = `<div class="detail">${qtyStepper(item)}<p class="detail-note">עוד אין מחירים למוצר הזה. אחרי שתעלי קבלה שבה הוא מופיע, המחיר הרגיל יופיע כאן.</p>${sectionPicker(item)}</div>`;
         }
       }
-      const price = stats
+      const many = item.qty > 1 && stats;
+      const price = many
+        ? `<span class="price" aria-label="בערך ${money(store.lineEstimate(item, stats))} שקלים"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(store.lineEstimate(item, stats))}</bdi><small class="price-each">${
+            stats.weighted ? `${item.qty} × הכמות הרגילה` : `<bdi dir="ltr">${item.qty} × ₪${money(stats.usualPrice)}</bdi>`
+          }</small></span>`
+        : stats
         ? `<span class="price" aria-label="בערך ${money(stats.usualPrice)} שקלים${stats.weighted ? ' לקילו' : ''}"><bdi dir="ltr"><span class="approx" aria-hidden="true">~</span>₪${money(stats.usualPrice)}</bdi>${
             stats.weighted ? '<small> לק״ג</small>' : ''
           }</span>`
@@ -332,7 +358,7 @@
         <li class="item${item.checked ? ' done' : ''}${isLast ? ' last' : ''}" data-id="${item.id}">
           <div class="row">
             <button class="check" data-act="toggle" aria-label="${item.checked ? 'ביטול סימון' : 'סימון'} ${esc(item.name)}" aria-pressed="${item.checked}">${ICON_CHECK}</button>
-            <button class="name" data-act="expand" aria-expanded="${isOpen}">${esc(item.name)}</button>
+            <button class="name" data-act="expand" aria-expanded="${isOpen}">${esc(item.name)}${qtyBadge(item)}</button>
             ${price}
           </div>
           ${detail}
@@ -944,8 +970,13 @@
     if (form.id === 'addForm') {
       const input = form.querySelector('input');
       const typed = input.value.trim();
-      const item = store.addToList(typed, ui.listId);
+      const { name, qty } = window.KniyotStore.parseQuantity(typed);
+      const item = store.addToList(name, ui.listId, qty);
       if (item) {
+        if (item.merged) {
+          delete item.merged;
+          toast(`${item.name} כבר ברשימה. הכמות עכשיו ${item.qty}`);
+        }
         // Phone keyboards can re-type a word that was still being composed after we
         // clear the box, so end the composition first (blur), then clear, and check again.
         input.blur();
@@ -1058,6 +1089,10 @@
 
     if (t.dataset.act === 'toggle' && li) {
       store.toggleItem(li.dataset.id);
+      render();
+    } else if ((t.dataset.act === 'qty-inc' || t.dataset.act === 'qty-dec') && li) {
+      const item = store.state.list.find((i) => i.id === li.dataset.id);
+      if (item) store.setQty(item.id, (item.qty || 1) + (t.dataset.act === 'qty-inc' ? 1 : -1));
       render();
     } else if (t.dataset.act === 'expand' && li) {
       ui.expanded = ui.expanded === li.dataset.id ? null : li.dataset.id;

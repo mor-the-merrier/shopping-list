@@ -3,6 +3,7 @@
 A family shopping list (Hebrew interface) that learns from your digital supermarket receipts:
 
 - **Usual price next to every item.** Upload a receipt and the app remembers what you paid. Add "milk" to the list and the price you usually pay shows up next to it, styled like a shelf tag.
+- **Quantities:** type "2 חלב", "חלב 2" or "חלב x2" (a plain number counts up to 10, so "12 ביצים" stays a tray of 12), add the same item again to raise it, or use the − / + in the item's details. The estimate uses the usual price × quantity; with no quantity, what you usually buy.
 - **Grouped by store section** (produce, dairy, bakery, cleaning…), in the order you walk through the store. Sections are guessed from product names with a keyword list (`js/categories.js`) and can be changed per product.
 - **Estimated total** for the list, and a place to record what you actually paid when you finish shopping.
 - **Shelf price check.** Tap an item, type the price on the shelf, and see whether it's cheaper, normal or more expensive than usual.

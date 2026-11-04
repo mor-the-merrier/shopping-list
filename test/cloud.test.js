@@ -164,6 +164,16 @@ function memoryStorage() {
   assert.strictEqual(storeA.state.receipts.length, 0);
   assert.strictEqual(storeA.state.purchases.length, 0);
 
+  // --- Quantities sync ---
+  const bread = storeA.addToList('לחם', null, 2);
+  await tick();
+  await tick();
+  assert.strictEqual(storeB.itemsOf(null).find((i) => i.name === 'לחם').qty, 2, 'B sees the quantity');
+  storeB.setQty(bread.id, 4);
+  await tick();
+  await tick();
+  assert.strictEqual(storeA.itemsOf(null).find((i) => i.id === bread.id).qty, 4, 'A sees B change it');
+
   // --- Extra lists sync, and same-named lists merge on join ---
   const pharmA = storeA.addList('פארם');
   storeA.addToList('אקמול', pharmA.id);

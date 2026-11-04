@@ -56,6 +56,26 @@
     return String(code).length >= 8 ? String(code) : `${chainId}:${code}`;
   }
 
+  const clampQty = (n) => Math.max(1, Math.min(99, Math.round(Number(n) || 1)));
+
+  /**
+   * "2 חלב", "חלב 2", "חלב x2", "3× ביצים" → { name: 'חלב', qty: 2 }.
+   * A plain number (no "x") counts only up to 10: "12 ביצים" is a tray of 12,
+   * "שמנת 250" is a size. "3%" is part of the name.
+   */
+  function parseQuantity(text) {
+    const s = String(text || '').trim().replace(/\s+/g, ' ');
+    let m = s.match(/^(\d{1,2})\s*[x×*]\s*(.*\S)$/); // "2x חלב"
+    if (m && /[^\d\s]/.test(m[2])) return { name: m[2].trim(), qty: clampQty(m[1]) };
+    m = s.match(/^(\d{1,2})\s+(.*\S)$/); // "2 חלב"
+    if (m && /[^\d\s]/.test(m[2]) && +m[1] >= 1 && +m[1] <= 10) return { name: m[2].trim(), qty: clampQty(m[1]) };
+    m = s.match(/^(.*\S)\s*[x×*]\s*(\d{1,2})$/);
+    if (m) return { name: m[1].trim(), qty: clampQty(m[2]) };
+    m = s.match(/^(.*[^\d\s].*?)\s+(\d{1,2})$/);
+    if (m && +m[2] >= 1 && +m[2] <= 10) return { name: m[1].trim(), qty: clampQty(m[2]) };
+    return { name: s, qty: null };
+  }
+
   class Store {
     constructor(state) {
       this.state = Object.assign(emptyState(), state || {});
@@ -367,16 +387,33 @@
     }
 
     // ---------- list items ----------
-    addToList(name, listId = null) {
+    /**
+     * Add to a list. qty: how many (omitted = "the usual amount").
+     * Adding something that's already on the list raises its quantity instead.
+     * Returns the item; item.merged is true when an existing line was raised.
+     */
+    addToList(name, listId = null, qty = null) {
       const clean = String(name || '').trim(); // exactly what was typed
       if (!clean) return null;
       const dup = this.itemsOf(listId).find((i) => !i.checked && norm(i.name) === norm(clean));
-      if (dup) return dup;
+      if (dup) {
+        dup.qty = clampQty((dup.qty || 1) + (qty || 1));
+        this.save();
+        return Object.assign(dup, { merged: true });
+      }
       const item = { id: uid('l'), name: clean, checked: false, addedAt: new Date().toISOString() };
       if (listId) item.listId = listId;
+      if (qty && qty > 1) item.qty = clampQty(qty);
       this.state.list.push(item);
       this.save();
       return item;
+    }
+
+    setQty(id, qty) {
+      const item = this.state.list.find((i) => i.id === id);
+      if (!item) return;
+      item.qty = clampQty(qty);
+      this.save();
     }
 
     toggleItem(id) {
@@ -409,12 +446,24 @@
           sum.unpriced++;
           continue;
         }
-        sum.all += s.typicalSpend;
-        if (item.checked) sum.cart += s.typicalSpend;
+        const line = this.lineEstimate(item, s);
+        sum.all += line;
+        if (item.checked) sum.cart += line;
       }
       sum.all = round2(sum.all);
       sum.cart = round2(sum.cart);
       return sum;
+    }
+
+    /**
+     * Expected cost of one list line. No quantity given: what a trip usually
+     * spends on it (3 cottage cheeses = 3). A quantity: the usual price × that many
+     * (for something weighed, that many times the usual amount).
+     */
+    lineEstimate(item, stats) {
+      if (!stats) return 0;
+      if (!item.qty) return stats.typicalSpend;
+      return round2((stats.weighted ? stats.typicalSpend : stats.usualPrice) * item.qty);
     }
 
     /** Close a shopping trip: remember estimate vs. actual, clear the cart. */
@@ -469,7 +518,7 @@
     }
   }
 
-  const api = { Store, codeKey, median, todayISO, uid, norm };
+  const api = { Store, codeKey, median, todayISO, uid, norm, parseQuantity };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KniyotStore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

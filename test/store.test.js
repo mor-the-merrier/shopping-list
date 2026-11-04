@@ -137,3 +137,39 @@ console.log('OK: store, stats, suggestions');
   assert.strictEqual(s2.state.list.filter((i) => i.listId).length, 0, 'deleting a list removes its items');
   console.log('OK: extra lists');
 }
+
+// ---------- quantities ----------
+{
+  const { parseQuantity } = require('../js/store.js');
+  assert.deepStrictEqual(parseQuantity('2 חלב'), { name: 'חלב', qty: 2 });
+  assert.deepStrictEqual(parseQuantity('חלב x3'), { name: 'חלב', qty: 3 });
+  assert.deepStrictEqual(parseQuantity('ביצים x12'), { name: 'ביצים', qty: 12 });
+  assert.deepStrictEqual(parseQuantity('12 ביצים'), { name: '12 ביצים', qty: null }, 'a tray of 12, not twelve');
+  assert.deepStrictEqual(parseQuantity('חלב 3%'), { name: 'חלב 3%', qty: null });
+  assert.deepStrictEqual(parseQuantity('שמנת 250'), { name: 'שמנת 250', qty: null });
+
+  const s3 = new Store();
+  const milkReceipt = parse(text);
+  const { unknown } = s3.importReceipt(milkReceipt);
+  for (const u of unknown) s3.assignCode(u.key, u.rawName);
+  s3.assignCode('7290000000017', 'חלב'); // 6.90, one per trip
+  s3.assignCode('7290000000055', 'קוטג'); // 6.50, two per trip
+
+  const milk = s3.addToList('חלב', null, 2);
+  assert.strictEqual(milk.qty, 2);
+  const again = s3.addToList('חלב');
+  assert.strictEqual(again.id, milk.id, 'same line, not a duplicate');
+  assert.strictEqual(again.qty, 3, 'adding again raises the quantity');
+  assert.strictEqual(again.merged, true);
+  s3.setQty(milk.id, 0);
+  assert.strictEqual(milk.qty, 1, 'never below 1');
+  s3.setQty(milk.id, 2);
+
+  const cottage = s3.addToList('קוטג'); // no quantity: the usual amount (2 × 6.50)
+  assert.strictEqual(cottage.qty, undefined);
+  const est = s3.estimate();
+  assert.strictEqual(est.all, 13.8 + 13, 'milk 2 × 6.90 + cottage as usually bought');
+  s3.setQty(cottage.id, 1);
+  assert.strictEqual(s3.estimate().all, 13.8 + 6.5, 'quantity given: usual price × quantity');
+  console.log('OK: quantities');
+}

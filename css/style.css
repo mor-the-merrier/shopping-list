@@ -821,3 +821,48 @@ details.lines > summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
 .name-from.yours { color: var(--accent-strong); }
 
 .line-full { font-size: 12px; color: var(--faint); }
+
+/* ---------- quantities ---------- */
+.qty-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 800;
+  vertical-align: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.item.done .qty-badge { background: transparent; color: var(--faint); }
+
+.price-each { display: block; font-size: 12px; font-weight: 400; color: var(--muted); text-align: left; }
+
+.qty-row { display: flex; align-items: center; gap: 12px; margin: 2px 0 12px; }
+
+.qty-label { color: var(--muted); }
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1.5px solid var(--check);
+  border-radius: 999px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.stepper button {
+  border: 0;
+  background: none;
+  width: 44px;
+  height: 40px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.stepper button[disabled] { color: var(--check); cursor: default; }
+
+.stepper output { min-width: 32px; text-align: center; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; }
