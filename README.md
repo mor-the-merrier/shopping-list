@@ -31,6 +31,14 @@ For picture receipts the code, description and amount columns are read separatel
 
 Before saving, every receipt can be reviewed: fix a name or price, remove a line, add a missing one, and compare the lines' sum with the receipt's total. On photos of dot-matrix receipts the Hebrew names often come out garbled. That's expected: the barcode and price are what matter, and each product is named once.
 
+### Product names
+
+Names come from three places, in this order:
+
+1. **Products you already named:** a barcode you've seen before always gets your name.
+2. **The barcode list** (`data/barcodes.json`, about 33,000 products): built weekly by a GitHub Action (`.github/workflows/barcodes.yml`, `scripts/build_barcodes.py`) from the price files Israeli chains must publish by law. It currently reads Shufersal, Yohananof and Rami Levy. Barcodes are national, so the names work for receipts from any chain. `data/meta.json` shows when it last ran and from which branches. The Action can also be run by hand from the repository's **Actions** tab.
+3. **OCR fixes** (photos only, `js/names.js`): products without a national barcode (produce, in-store codes) are matched word by word against a Hebrew product vocabulary, with low cost for letters OCR confuses on receipts (ה/ח, ם/ס, נ/ג, ר/ד…), unreadable characters treated as unknown letters, and split words rejoined.
+
 ### How prices and suggestions are calculated
 
 - **Usual price:** the median shelf price over the last year, so a one-off sale doesn't skew it.
@@ -101,6 +109,7 @@ node test/store.test.js    # prices, frequency, suggestions, totals
 node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 node test/shufersal.test.js  # Shufersal layout from made-up OCR words
 node test/paper.test.js      # photo cleaning, columns, barcodes, several photos
+node test/names.test.js      # names: barcode list, your products, OCR fixes
 ```
 
 `test/sample-yohananof.txt` is a made-up receipt in the Weezmo format. Its products, barcodes and prices are fictional.
@@ -115,6 +124,8 @@ node test/paper.test.js      # photo cleaning, columns, barcodes, several photos
 | `js/pdf.js` | Extracts text from a PDF receipt with pdf.js |
 | `js/ocr.js` | Reads picture receipts (Shufersal, screenshots) with Tesseract.js |
 | `js/shufersal.js` | Turns OCR results (Shufersal, photos) into receipt lines |
+| `js/names.js` | Product names: your products, the barcode list, OCR-aware word fixes |
+| `scripts/build_barcodes.py` | Builds `data/barcodes.json` from the chains' public price files (run by the weekly Action) |
 | `js/paper.js` | Photos of paper receipts: cleaning, finding the columns, merging several photos |
 | `js/categories.js` | Store sections and the keyword list used to guess them |
 | `js/store.js` | Local data, usual price (median), purchase frequency, estimated total |
