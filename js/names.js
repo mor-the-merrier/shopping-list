@@ -152,6 +152,49 @@
     }
   }
 
+  // ---------- short names for the list ----------
+  // Store-style names carry sizes, percentages, packaging and brands:
+  // "שמנת לבישול 15% 250 מ"ל" → "שמנת לבישול".
+  const DROP_WORDS = new Set(
+    `גרם גר ג קג ק"ג ליטר ל מל מ"ל מ"ל יח יח' יחידות יחידה מידה מנה מנות שומן אחוז
+     בקרטון קרטון קרט בשקית שקית שקיות בבקבוק בקבוק פחית בפחית מארז במארז זוגות זוג וואקום בואקום ואקום
+     ארוז ארוזה ארוזים במשקל שקיל משקל מוקטן גדול גדולה קטן קטנה חדש חדשה מבצע
+     תנובה שטראוס יטבתה טרה עלית אסם תלמה סוגת יופלה אנגל מוריץ שופרסל יוחננוף רמי לוי עסיס פרימור
+     מעדנות ויליפוד נסטלה יכין זוגלובק טבעול סנפרוסט מילוטל גד הנסיכה בייגל קוקה קולה פריגת`
+      .split(/\s+/)
+      .map((w) => w.replace(/["'׳״]/g, ''))
+  );
+  const ABBREVIATIONS = [
+    [/(^|\s)גב(?:י)?\.(?=[א-ת])/g, '$1גבינה '], // "גב.לבנה" → "גבינה לבנה"
+    [/(^|\s)שמ\.(?=[א-ת])/g, '$1שמנת '],
+    [/חצי\s*מנה\s*\d*/g, ' '], // "חצי מנה100": a pack size, unlike "חצי קשה"
+    [/(^|\s)גב['׳]?\.?(?=\s|$)/g, '$1גבינה'],
+    [/(^|\s)גבי\.(?=\s|$)/g, '$1גבינה'],
+    [/(^|\s)שמ\.(?=\s|$)/g, '$1שמנת'],
+  ];
+
+  function shortName(name) {
+    let s = String(name || '');
+    for (const [re, to] of ABBREVIATIONS) s = s.replace(re, to);
+    s = s
+      .replace(/[()"\]\[+*,\-–—/]/g, ' ') // brackets, quotes and separators
+      .replace(/(\D)(\d)/g, '$1 $2') // "חמוצה15%" → "חמוצה 15%"
+      .replace(/(\d)([^\d\s.%*])/g, '$1 $2'); // "150גר" → "150 גר"
+    const words = s.split(/\s+/).filter(Boolean);
+    const kept = [];
+    for (const w of words) {
+      const bare = w.replace(/["'׳״.]/g, '');
+      if (!bare) continue;
+      if (/\d/.test(bare) || bare === '%') continue; // sizes, percentages, counts
+      if (DROP_WORDS.has(bare)) continue;
+      if (bare.length < 2 && HEB.test(bare)) continue; // a cut-off letter at the end
+      if (!HEB.test(bare)) continue; // latin leftovers ("L", "x")
+      kept.push(w.replace(/\.$/, ''));
+    }
+    const out = kept.slice(0, 4).join(' ');
+    return out || String(name || '').replace(/\d+/g, '').trim();
+  }
+
   // ---------- the barcode list (lazy, cached) ----------
   let data = null;
 
@@ -194,10 +237,11 @@
         it.name = mine;
         it.nameFrom = 'yours';
       } else if (it.code && codes[it.code]) {
-        it.name = codes[it.code];
+        it.fullName = codes[it.code];
+        it.name = shortName(codes[it.code]);
         it.nameFrom = 'barcode';
       } else if (opts.fixOcr) {
-        const fixed = vocab.fixName(it.name);
+        const fixed = shortName(vocab.fixName(it.name));
         if (fixed && fixed !== it.name) {
           it.name = fixed;
           it.nameFrom = 'fixed';
@@ -207,7 +251,7 @@
     return items;
   }
 
-  const api = { improve, load, Vocabulary, distance, BASE_WORDS, _reset: () => (data = null) };
+  const api = { improve, load, shortName, Vocabulary, distance, BASE_WORDS, _reset: () => (data = null) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ProductNames = api;
 })(typeof window !== 'undefined' ? window : globalThis);

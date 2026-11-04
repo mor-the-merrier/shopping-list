@@ -114,6 +114,7 @@
 
   /** Shorten a receipt name into a friendlier default ("ביצים 12 יח גדול" → "ביצים"). */
   function suggestName(raw) {
+    if (window.ProductNames) return window.ProductNames.shortName(raw);
     let s = String(raw)
       .replace(/\b\d+(?:\.\d+)?\s*(?:גרם|גר|ג|ק["״]?ג|קג|מ["״]?ל|מל|ליטר|ל|יח(?:'|׳)?|%)(?=\s|$)/g, '')
       .replace(/\b\d+(?:\.\d+)?%?(?=\s|$)/g, '')
@@ -639,6 +640,7 @@
               <span class="line-meta">${it.code ? `<span class="line-code">${esc(it.code)}</span>` : ''}${
                 it.nameFrom === 'barcode' ? '<span class="name-from">שם לפי הברקוד</span>' : it.nameFrom === 'yours' ? '<span class="name-from yours">מוצר שכבר שמור אצלך</span>' : ''
               }${qty}</span>
+              ${it.fullName && it.fullName !== it.name ? `<span class="line-full">${esc(it.fullName)}</span>` : ''}
             </div>
             <label class="sr-only" for="lp-${i}">מחיר בשורה ${i + 1}</label>
             <input id="lp-${i}" class="line-price" data-line="${i}" data-field="total" value="${money(it.total)}" inputmode="decimal" autocomplete="off">

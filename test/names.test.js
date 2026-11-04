@@ -38,13 +38,14 @@ const N = require('../js/names.js');
   assert.deepStrictEqual(
     items.map((i) => [i.name, i.nameFrom]),
     [
-      ['גבינת פקורינו 36% 200 גר', 'barcode'],
+      ['גבינת פקורינו', 'barcode'],
       ['שמנת לבישול 15%', 'fixed'],
       ['לחם אחיד', 'yours'],
       ['חומוס גרעינים', 'fixed'],
     ]
   );
   assert.strictEqual(items[0].ocrName, 'ינת בקךרי1 36%', 'what OCR read is kept');
+  assert.strictEqual(items[0].fullName, 'גבינת פקורינו 36% 200 גר', 'the full store name is kept');
 
   // Text receipts: barcode names only, readable names never "fixed"
   N._reset();
@@ -58,6 +59,22 @@ const N = require('../js/names.js');
   const offline = [{ code: '7290000000015', name: 'טלב' }];
   await N.improve(offline, { fixOcr: true });
   assert.strictEqual(offline[0].name, 'חלב');
+
+  // ---------- short names ----------
+  const short = {
+    'שמנת לבישול 15% 250 מ"ל': 'שמנת לבישול',
+    'פקורינו פרוס 34% 150גר': 'פקורינו פרוס',
+    'קוטג 5% 250ג שטראוס': 'קוטג',
+    'יוגורט יווני8*140ג יופלה': 'יוגורט יווני',
+    'חלב מפוסטר 1% בקרטון 1ל': 'חלב מפוסטר',
+    'גב.לבנה 5% שומן 500 גרם': 'גבינה לבנה',
+    'שמנת חמוצה15% חצי מנה100': 'שמנת חמוצה',
+    'גבינה חצי קשה מופחת': 'גבינה חצי קשה מופחת',
+    'תירס בואקום - 2 יח )ק(': 'תירס',
+    'מוצרלה בגליל 22% במשקל': 'מוצרלה בגליל',
+    'לחם אחיד פרוס': 'לחם אחיד פרוס',
+  };
+  for (const [full, want] of Object.entries(short)) assert.strictEqual(N.shortName(full), want, full);
 
   console.log('OK: product names (barcode list, your products, OCR fixes)');
 })().catch((e) => {
