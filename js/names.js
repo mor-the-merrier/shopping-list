@@ -208,11 +208,16 @@
       .finally(() => timer && clearTimeout(timer));
   }
 
-  /** Load data/barcodes.json and data/words.json once. Works without them (first run, offline). */
+  /** Load data/barcodes.json, words.json and prices.json once. Works without them (first run, offline). */
   function load(base = 'data/') {
     if (!data) {
-      data = Promise.all([fetchJson(base + 'barcodes.json', 15000), fetchJson(base + 'words.json', 15000)]).then(([codes, words]) => ({
+      data = Promise.all([
+        fetchJson(base + 'barcodes.json', 15000),
+        fetchJson(base + 'words.json', 15000),
+        fetchJson(base + 'prices.json', 15000), // shelf prices, for checking prices read from photos
+      ]).then(([codes, words, prices]) => ({
         codes: codes || {},
+        prices: prices || {},
         vocab: new Vocabulary(Array.isArray(words) ? words : []),
       }));
     }

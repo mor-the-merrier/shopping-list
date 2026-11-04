@@ -115,6 +115,28 @@
   }
 
   /**
+   * Bridge narrow vertical white gaps inside characters. Many receipt printers
+   * have a dead dot in the print head, which leaves a thin white stripe down the
+   * paper; where it crosses a digit, a "0" turns into "C(". Ink on both sides of
+   * a gap up to 2r pixels wide is joined; gaps between characters are wider.
+   */
+  function closeGaps(bin, width, height, r = 3) {
+    const out = new Uint8ClampedArray(bin);
+    for (let y = 0; y < height; y++) {
+      const row = y * width;
+      let lastInk = -1;
+      for (let x = 0; x < width; x++) {
+        if (bin[row + x] !== 0) continue;
+        if (lastInk >= 0 && x - lastInk > 1 && x - lastInk <= 2 * r + 1) {
+          for (let k = lastInk + 1; k < x; k++) out[row + k] = 0;
+        }
+        lastInk = x;
+      }
+    }
+    return out;
+  }
+
+  /**
    * The full cleaning step on an already cropped and scaled picture.
    * Returns { text, digits }: gray arrays for the Hebrew/price passes and the barcode pass.
    */
@@ -125,8 +147,9 @@
     const gray = maxChannel(rgba, width, height);
     const even = evenLight(gray, width, height, Math.max(12, Math.round(width / o.radiusDiv)));
     const text = threshold(even, o.textLevel);
-    const digits = thicken(threshold(even, o.digitsLevel), width, height);
-    return { text, digits };
+    let digits = thicken(threshold(even, o.digitsLevel), width, height);
+    if (o.gapClose) digits = closeGaps(digits, width, height, o.gapClose);
+    return { text, digits, gray: even };
   }
 
   /**
@@ -552,7 +575,7 @@
     });
   }
 
-  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, estimateSkew, levelLines, findColumns, findTotal, applyTotal, lineBands, bigTotalBox, detectStore, storeFromName, mergePhotos, KNOWN };
+  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, closeGaps, estimateSkew, levelLines, findColumns, findTotal, applyTotal, lineBands, bigTotalBox, detectStore, storeFromName, mergePhotos, KNOWN };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaperReceipt = api;
 })(typeof window !== 'undefined' ? window : globalThis);

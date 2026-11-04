@@ -33,7 +33,7 @@
    * Each word: { text, bbox: { x0, y0, x1, y1 } } in full-image pixels.
    * codeFrom / amountTo: the column edges in pixels (default: Shufersal's layout).
    */
-  function buildRows({ words, codeWords, amountWords, midWords = [], width, codeFrom, amountTo }) {
+  function buildRows({ words, codeWords, amountWords, amountWords2 = [], midWords = [], width, codeFrom, amountTo }) {
     const cFrom = codeFrom != null ? codeFrom : width * CODE_FROM;
     const aTo = amountTo != null ? amountTo : width * AMOUNT_TO;
     const all = [];
@@ -49,6 +49,8 @@
       all.push({ kind: 'code', w });
     }
     for (const w of amountWords) all.push({ kind: 'amount', w });
+    // photos: a second reading of the prices, from a differently cleaned image
+    for (const w of amountWords2) all.push({ kind: 'amount2', w });
     // photos: the middle of the line read as digits, for "6.50 x 4" and weights
     for (const w of midWords) all.push({ kind: 'mid', w });
     all.sort((a, b) => centerY(a.w) - centerY(b.w));
@@ -66,7 +68,7 @@
       const y = centerY(a.w);
       let row = rows.length ? rows[rows.length - 1] : null;
       if (!row || Math.abs(row.y - y) > tolerance) {
-        row = { y, desc: [], code: [], amount: [], mid: [] };
+        row = { y, desc: [], code: [], amount: [], amount2: [], mid: [] };
         rows.push(row);
       }
       row[a.kind].push(a.w);
@@ -80,7 +82,7 @@
       const pick = (list) => list.slice().sort((p, q) => Math.abs(p.y - top) - Math.abs(q.y - top))[0];
       let row = pick(free) || pick(inside);
       if (!row) {
-        row = { y: centerY(a.w), desc: [], code: [], amount: [], mid: [] };
+        row = { y: centerY(a.w), desc: [], code: [], amount: [], amount2: [], mid: [] };
         rows.push(row);
         rows.sort((p, q) => p.y - q.y);
       }
@@ -106,6 +108,7 @@
         .replace(/\s+/g, ' ')
         .trim(),
       amount: r.amount.map((w) => w.text).join('').replace(/[^\d.-]/g, ''),
+      amount2: r.amount2.map((w) => w.text).join('').replace(/[^\d.-]/g, ''),
       mid: r.mid
         .sort((a, b) => a.bbox.x0 - b.bbox.x0)
         .map((w) => w.text)
@@ -166,33 +169,83 @@
    * A quantity line read from the middle of a photo ("6.50 x 4", "6.90 x 0.650"):
    * the unit price before the x, and the amount of the line decides the rest.
    */
-  function midQuantity(mid, amount) {
-    const m = String(mid || '').match(/(\d{0,4}\.?\d{0,2})\s*[xX×]\s*(.*)$/);
+  function midQuantity(mid, amount, raw) {
+    const m = String(mid || '').match(/(\d{0,4}\.?\d{0,3})\s*[xX×]\s*(.*)$/);
     if (!m) return null;
-    const unitPrice = parseFloat(m[1]) || 0;
+    const uStr = m[1];
     const rest = m[2];
     const paid = amount != null && amount > 0 ? amount : null;
     // a weight has 3 decimals; "ק"ג" before it often reads as digits, so keep one digit before the point
     const w = rest.match(/(\d\.\d{3})(?!\d)/);
-    // without a weight, the unit price must have read whole ("6.50")
-    if (!w && !/^\d{1,4}\.\d{2}$/.test(m[1])) return null;
-    if (!w && !(unitPrice > 0)) return null;
-    if (w && !paid && !/^\d{1,4}\.\d{2}$/.test(m[1])) return null;
-    if (w && parseFloat(w[1]) > 0) {
-      const qty = parseFloat(w[1]);
-      // the line's amount reads more reliably than the small unit price
-      return { qty, unitPrice: paid ? round2(paid / qty) : unitPrice, weighted: true, total: paid || round2(qty * unitPrice) };
-    }
+    if (w && parseFloat(w[1]) > 0) return weighedLine(w[1], uStr, paid, raw == null ? String(amount) : raw);
+
+    const unitPrice = /^\d{1,4}\.\d{2}$/.test(uStr) ? parseFloat(uStr) : null;
+    const n = rest.match(/^\s*(\d{1,2})(?![\d.])/);
+    const count = n && +n[1] > 0 ? +n[1] : null;
     if (paid) {
-      const ratio = paid / unitPrice;
-      if (Math.round(ratio) >= 1 && Math.abs(ratio - Math.round(ratio)) < 0.02) return { qty: Math.round(ratio), unitPrice, weighted: false, total: paid };
-      const n = rest.match(/^\s*(\d{1,2})(?![\d.])/);
-      if (n && +n[1] > 0) return { qty: +n[1], unitPrice: round2(paid / +n[1]), weighted: false, total: paid };
+      if (unitPrice) {
+        const ratio = paid / unitPrice;
+        if (Math.round(ratio) >= 1 && Math.abs(ratio - Math.round(ratio)) < 0.02) return { qty: Math.round(ratio), unitPrice, weighted: false, total: paid, qtyChecked: true };
+      }
+      // the unit price didn't read ("6.80" → "4 80"): the count after the x and the
+      // line's amount are enough, when the amount divides evenly
+      if (count && count <= 60 && Math.round(paid * 100) % count === 0) {
+        return { qty: count, unitPrice: round2(paid / count), weighted: false, total: paid, qtyChecked: true };
+      }
       return null;
     }
-    const n = rest.match(/^\s*(\d{1,2})(?![\d.])/);
-    if (n && +n[1] > 0) return { qty: +n[1], unitPrice, weighted: false, total: round2(+n[1] * unitPrice) };
+    if (count && unitPrice) return { qty: count, unitPrice, weighted: false, total: round2(count * unitPrice) };
     return null;
+  }
+
+  /**
+   * A weighed line: weight × price per kilo = amount. All three are read from a
+   * small dot-matrix print, and their last digits are the least reliable, so
+   * look for the closest combination where the arithmetic works out:
+   * changing a digit costs 1, a price per kilo that only partly read
+   * ("5.00" for "85.00", ".90") is completed, and the amount keeps its first digits.
+   */
+  function weighedLine(qStr, uStr, paid, raw) {
+    const q0 = parseFloat(qStr);
+    if (!paid) {
+      const u = /^\d{1,4}\.\d{2}$/.test(uStr) ? parseFloat(uStr) : null;
+      return u ? { qty: q0, unitPrice: u, weighted: true, total: round2(q0 * u) } : null;
+    }
+    const rawStr = String(raw || paid).replace(/[^\d.]/g, '');
+    const oneDecimal = /^\d+\.\d$/.test(rawStr);
+    const fullU = /^\d{1,4}\.\d{2}$/.test(uStr);
+    // what's known of the price per kilo: its cents ("6.90", ".90", "90")
+    const cents = (uStr.match(/\.(\d{2})$/) || [])[1] || (/^\d{2}$/.test(uStr) ? uStr : null);
+    const qCands = [{ q: q0, cost: 0 }];
+    for (let d = 0; d <= 9; d++) {
+      const q = parseFloat(qStr.slice(0, -1) + d);
+      if (q !== q0 && q > 0) qCands.push({ q, cost: d === 0 ? 0.9 : 1 });
+    }
+    let best = null;
+    const consider = (q, qCost, u, uCost) => {
+      const total = round2(q * u);
+      // the amount must keep its first digits; only its last one may change
+      if (Math.floor(total * 10 + 1e-6) !== Math.floor(paid * 10 + 1e-6)) return;
+      const aCost = Math.abs(total - paid) < 0.005 || oneDecimal ? 0 : 1;
+      const cost = qCost + uCost + aCost;
+      if (!best || cost < best.cost - 1e-9) best = { cost, qty: q, unitPrice: u, total };
+    };
+    for (const { q, cost } of qCands) {
+      const center = paid / q;
+      for (let c = Math.max(1, Math.round((center - 0.6) * 100)); c <= Math.round((center + 0.6) * 100); c++) {
+        const u = c / 100;
+        const us = u.toFixed(2);
+        let uCost;
+        if (fullU && us === uStr) uCost = 0;
+        else if (fullU && us.endsWith(uStr.replace(/^0+/, ''))) uCost = 1; // "5.00" was the end of "85.00"
+        else if (!fullU && cents && us.endsWith('.' + cents)) uCost = 0.5;
+        else if (c % 10 === 0) uCost = 2.5; // prices per kilo end in 0
+        else continue;
+        consider(q, cost, u, uCost);
+      }
+    }
+    if (!best) return { qty: q0, unitPrice: round2(paid / q0), weighted: true, total: paid };
+    return { qty: best.qty, unitPrice: best.unitPrice, weighted: true, total: best.total, qtyChecked: true };
   }
 
   /**
@@ -201,14 +254,14 @@
    * the description ("לק"ג 9.90 א" + "1.205").
    */
   function rowQuantity(r, amount) {
-    const direct = midQuantity(r.mid, amount);
+    const direct = midQuantity(r.mid, amount, r.amount);
     if (direct) return direct;
     if (!r.ltr) return null;
     const joined = `${r.ltr} ${r.mid || ''}`
       .replace(/(^|\s)[אxX×*](?=\s|$)/g, '$1x')
       .replace(/[^\d.x\s]/g, ' ')
       .replace(/\s+/g, ' ');
-    return midQuantity(joined, amount);
+    return midQuantity(joined, amount, r.amount);
   }
 
   /** OCR often reads the "x" between numbers as the Hebrew letter א. */
@@ -329,8 +382,20 @@
       const midQty = pending && pending.total == null && !weight && !units && r.code.length < minCode ? rowQuantity(r, amount) : null;
       if (midQty) {
         Object.assign(pending, midQty);
+        pending.totalAlt = parseAmount(r.amount2);
         close();
         continue;
+      }
+      // photos: a weight line whose item's code didn't read at all ("מלפפון  46"):
+      // the item is the line above it
+      if (paper && started && items.length && !pending && r.code.length < minCode && amount != null && amount > 0) {
+        const q = !weight && !units ? rowQuantity(r, amount) : null;
+        const above = rows[i - 1];
+        if (q && q.weighted && above && !parseAmount(above.amount) && above.desc && !rowQuantity(above, null)) {
+          lastItemRow = i;
+          items.push(Object.assign({ row: i - 1, code: '', name: fixTimes(above.desc), discount: 0 }, q));
+          continue;
+        }
       }
 
       if ((weight || units) && pending) {
@@ -355,6 +420,7 @@
       if (paper && pending && pending.total == null && r.code.length < minCode && amount != null && amount > 0) {
         pending.total = amount;
         pending.unitPrice = amount;
+        pending.totalAlt = parseAmount(r.amount2);
         close();
         continue;
       }
@@ -370,7 +436,12 @@
         lastItemRow = i;
         close();
         pending = { row: i, code: fixBarcode(r.code), name: desc, unitPrice: null, qty: 1, total: null, discount: 0, weighted: false };
-        if (amount != null && amount > 0) {
+        // photos: when a quantity line follows, its amount is the item's
+        // (anything read at the left of this line is the name running long)
+        const nx = rows[i + 1];
+        const qtyNext = paper && nx && nx.code.length < minCode && parseAmount(nx.amount) > 0 && rowQuantity(nx, parseAmount(nx.amount));
+        if (amount != null && amount > 0 && !qtyNext) {
+          pending.totalAlt = parseAmount(r.amount2);
           pending.total = amount;
           pending.unitPrice = amount;
         }

@@ -226,13 +226,15 @@
     const data = wctx.getImageData(0, 0, work.width, work.height).data;
     const clean = P.cleanForOcr(data, work.width, work.height);
     // a curled or tilted receipt: level every text line (OCR reads rows)
-    const level = P.levelLines ? P.levelLines([clean.text, clean.digits], work.width, work.height) : { images: [clean.text, clean.digits], angles: [] };
+    const level = P.levelLines([clean.text, clean.digits, clean.gray], work.width, work.height);
     return {
       text: grayCanvas(level.images[0], work.width, work.height),
       digits: grayCanvas(level.images[1], work.width, work.height),
+      gray: grayCanvas(level.images[2], work.width, work.height),
       width: work.width,
       height: work.height,
       skew: level.angles,
+      scale, // working pixels per photo pixel: text this small in the photo reads poorly
     };
   }
 
@@ -294,7 +296,7 @@
     let stage = 0;
     const label = () => `קורא את הקבלה${n > 1 ? ` (צילום ${photo + 1} מתוך ${n})` : ''}`;
     const logger = (m) => {
-      if (m.status === 'recognizing text') onProgress((photo + (stage + m.progress) / 4) / n, label());
+      if (m.status === 'recognizing text') onProgress((photo + Math.min(1, (stage + m.progress) / 5)) / n, label());
       else if (/loading|initializ/i.test(m.status)) onProgress(0.02, 'טוען את זיהוי הטקסט');
     };
     const heb = await Tesseract.createWorker('heb', 1, { logger });
@@ -320,6 +322,8 @@
         // prices: the thickened copy closes the gaps in dot-matrix zeros
         await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.-' });
         const r3 = await digits.recognize(strip(img.digits, 0, cols.amountTo));
+        // and again from the gray image: where the two readings differ, a digit is in doubt
+        const r3b = await digits.recognize(strip(img.gray || img.text, 0, cols.amountTo));
 
         // the total is often printed big and centered next to "לתשלום", outside the price column
         stage = 3;
@@ -345,12 +349,19 @@
           }
         }
 
+        // how tall the prices are in the photo itself: under ~28 pixels, digits misread often
+        const amountWords = unstrip(wordsOf(r3.data, 0), 0);
+        const hs = amountWords.filter((w) => /\d\.\d\d/.test(w.text)).map((w) => w.bbox.y1 - w.bbox.y0).sort((a, b) => a - b);
+        const digitPx = hs.length && img.scale ? hs[Math.floor(hs.length / 2)] / img.scale : null;
+
         out.push({
+          smallText: digitPx != null && digitPx < 28,
           text: r1.data.text || '',
           words,
           codeWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
           midWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
-          amountWords: unstrip(wordsOf(r3.data, 0), 0),
+          amountWords,
+          amountWords2: unstrip(wordsOf(r3b.data, 0), 0),
           footerWords,
           bigTotal,
           width: img.width,

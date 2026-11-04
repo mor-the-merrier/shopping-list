@@ -585,8 +585,8 @@
   function showParsed(parsed, text, extra = {}) {
     ui.pending = Object.assign({ parsed, duplicate: parsed.items.length ? store.isDuplicate(parsed) : false, text }, extra);
     // Open the line editor when something needs checking.
-    const mismatch = parsed.totalFound !== false && Math.abs(parsed.itemsSum - parsed.total) > 0.1;
-    ui.pending.editing = !!extra.photo || mismatch || parsed.totalFound === false;
+    // open the lines only when they don't add up to the total
+    ui.pending.editing = !parsed.totalFound || Math.abs(parsed.itemsSum - parsed.total) >= 0.005;
     render();
   }
 
@@ -608,6 +608,40 @@
       console.warn('Names not improved', e);
     }
     return parsed;
+  }
+
+  /**
+   * Photos: check barcodes and prices against the barcode list, shelf prices
+   * and the user's own receipts, and make the lines add up to the printed total
+   * where the fix is clear (js/check.js).
+   */
+  async function checkLines(parsed) {
+    if (!window.ReceiptCheck || !parsed || !parsed.items.length) return;
+    let codes = {}, prices = {};
+    try {
+      ({ codes, prices } = await window.ProductNames.load());
+    } catch (e) {
+      /* offline: the user's own data still helps */
+    }
+    const { codeKey } = window.KniyotStore;
+    const chainId = parsed.chain && parsed.chain.id ? parsed.chain.id : 'unknown';
+    const mine = (code) => {
+      const pid = store.state.codeMap[codeKey(chainId, code)];
+      return pid && store.state.products[pid] ? pid : null;
+    };
+    window.ReceiptCheck.checkReceipt(parsed, {
+      isKnownCode: (c) => !!codes[c] || !!mine(c),
+      nameOf: (c) => codes[c] || (mine(c) ? store.state.products[mine(c)].name : ''),
+      pricesOf: (c) => {
+        const own = [];
+        const pid = mine(c);
+        if (pid) {
+          const st = store.stats(pid);
+          if (st && !st.weighted) own.push(st.usualPrice, st.lastPrice);
+        }
+        return own.concat(prices[c] || []).filter((p) => p > 0);
+      },
+    });
   }
 
   // ---------- reviewing a receipt before saving ----------
@@ -646,23 +680,36 @@
         </section>`;
     }
 
-    // how the lines compare with the receipt's total
+    // the total printed on the receipt is what counts; the lines are checked against it
+    const diff = parsed.totalFound ? round2r(parsed.total - parsed.itemsSum) : null;
+    const unsure = items.filter((it) => it.sure === false).length;
     let check;
     if (!items.length) {
       check = `<p class="notice">לא הצלחתי לקרוא שורות מהצילום. כדאי לצלם שוב קרוב יותר, ישר מעל הקבלה ובאור טוב, או להוסיף שורות ידנית.</p>`;
-    } else if (parsed.totalFound === false) {
-      check = `<p class="notice">לא מצאתי את הסה״כ בצילום. סכום השורות: <b>₪${money(parsed.itemsSum)}</b>. כדאי לבדוק מול הקבלה.</p>`;
-    } else if (Math.abs(parsed.itemsSum - parsed.total) > 0.1) {
-      check = `<p class="notice">סכום השורות ₪${money(parsed.itemsSum)}, ובקבלה ₪${money(parsed.total)}. אפשר לתקן את השורות למטה.</p>`;
+    } else if (!parsed.totalFound) {
+      check = `<p class="notice">לא מצאתי את הסה״כ בקבלה. כדאי להקליד אותו למעלה: הוא מה שנשמר, ולפיו השורות נבדקות.</p>`;
+    } else if (Math.abs(diff) < 0.005) {
+      check = `<p class="notice ok">השורות מסתכמות בדיוק לסה״כ שבקבלה.</p>`;
     } else {
-      check = `<p class="notice ok">סכום השורות תואם לקבלה: ₪${money(parsed.total)}.</p>`;
+      check = `<p class="notice">השורות מסתכמות ל־₪${money(parsed.itemsSum)}, ${diff > 0 ? `חסרים ₪${money(diff)}` : `₪${money(-diff)} יותר`} מהסה״כ.${
+        unsure ? ` ${unsure === 1 ? 'מחיר אחד סומן כי' : `${unsure} מחירים סומנו כי`} לא נקראו בוודאות; שווה להשוות ${unsure === 1 ? 'אותו' : 'אותם'} לקבלה.` : ''
+      } הסה״כ נשמר כמו שהוא בקבלה בכל מקרה.</p>`;
     }
+    const smallText = parsed.smallText
+      ? `<p class="hint">הצילום רחוק, והספרות בו קטנות מדי לקריאה מדויקת. בפעם הבאה כדאי לצלם קבלה ארוכה בשניים־שלושה חלקים מקרוב.</p>`
+      : '';
+    const totalField = items.length
+      ? `<div class="review-field total-field">
+           <label for="receiptTotal">סה״כ לתשלום בקבלה</label>
+           <input id="receiptTotal" inputmode="decimal" autocomplete="off" value="${parsed.totalFound ? money(parsed.total) : ''}" placeholder="למשל 465.75">
+         </div>`
+      : '';
 
     const rowsHtml = items
       .map((it, i) => {
         const qty = it.qty !== 1 ? `<span class="line-qty">${it.weighted ? `${it.qty} ק״ג` : `${it.qty} ×`} ₪${money(it.unitPrice)}</span>` : '';
         return `
-          <li class="line-row">
+          <li class="line-row${it.sure === false && parsed.totalFound && Math.abs(diff) >= 0.005 ? ' unsure' : ''}">
             <div class="line-main">
               <label class="sr-only" for="ln-${i}">שם בשורה ${i + 1}</label>
               <input id="ln-${i}" class="line-name" data-line="${i}" data-field="name" value="${esc(it.name)}" placeholder="שם המוצר" autocomplete="off">
@@ -684,7 +731,7 @@
       <section class="panel review">
         <h3>${esc(storeName || 'קבלה מצולמת')}${parsed.date ? `, ${dateHe(parsed.date)}` : ''}</h3>
         <p>${items.length} שורות${photo ? ` · ${photoCount === 1 ? 'צילום אחד' : `${photoCount} צילומים`}` : ''}</p>
-        ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : check}
+        ${duplicate ? '<p class="notice">הקבלה הזו כבר שמורה.</p>' : `${totalField}${check}${smallText}`}
 
         ${
           photo
@@ -719,7 +766,7 @@
         }
 
         <details class="lines" ${editing ? 'open' : ''}>
-          <summary>בדיקה ותיקון של השורות (${items.length})</summary>
+          <summary>השורות (${items.length})</summary>
           ${photo && items.some((i) => !i.nameFrom || i.nameFrom === 'fixed') ? '<p class="hint">שם שלא נמצא לפי הברקוד נקרא מהצילום, ולפעמים יוצא משובש. אפשר לתקן אותו כאן או בשלב הבא, ופעם אחת מספיקה: בקבלות הבאות המוצר יזוהה לפי הברקוד.</p>' : ''}
           <ul class="line-list">${rowsHtml}</ul>
           <button class="link" data-act="add-line">+ הוספת שורה</button>
@@ -812,7 +859,9 @@
     const allParts = (prev ? prev.parts : []).concat(parts);
     const merged = P.mergePhotos(allParts);
     if (keep && keep.date && !merged.date) merged.date = keep.date;
-    progress(1, 'משלים שמות מוצרים');
+    progress(1, 'בודק מחירים וברקודים');
+    await checkLines(merged);
+    if (readings.some((r) => r.smallText)) merged.smallText = true;
     await improveNames(merged, true);
     ui.ocr = null;
     const storeName = (keep && keep.storeName) || (detected && detected.name) || lastStoreName();
@@ -1362,6 +1411,27 @@
       setReceiptDate(e.target.value);
       return;
     }
+    // the receipt's total, typed or corrected: it's what's saved, and the lines are checked against it
+    if (e.target.id === 'receiptTotal' && ui.pending) {
+      const p = ui.pending.parsed;
+      const raw = e.target.value.trim();
+      const v = parseFloat(raw.replace(',', '.').replace('₪', ''));
+      if (!raw) {
+        p.totalFound = false;
+      } else if (isNaN(v) || v <= 0) {
+        toast('הסה״כ צריך להיות מספר, למשל 465.75');
+        render();
+        return;
+      } else {
+        p.total = Math.round(v * 100) / 100;
+        p.totalFound = true;
+        await checkLines(p);
+      }
+      recalcPending();
+      ui.pending.editing = !p.totalFound || Math.abs(p.itemsSum - p.total) >= 0.005;
+      render();
+      return;
+    }
     if (e.target.dataset && e.target.dataset.line != null && ui.pending) {
       const it = ui.pending.parsed.items[+e.target.dataset.line];
       if (!it) return;
@@ -1375,8 +1445,12 @@
         }
         it.total = Math.round(v * 100) / 100;
         it.unitPrice = it.qty ? Math.round((it.total / it.qty) * 100) / 100 : it.total;
+        it.sure = true;
+        it.byHand = true; // the check step leaves it alone from now on
       }
       ui.pending.editing = true;
+      // a fixed line may leave a small difference the check can now explain
+      if (ui.pending.parsed.totalFound && ui.pending.photo) await checkLines(ui.pending.parsed);
       recalcPending();
       render();
       return;

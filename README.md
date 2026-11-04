@@ -42,6 +42,17 @@ For picture receipts the code, description and amount columns are read separatel
 - produce with a short in-store code ("22") counts as an item only when a weight or quantity line follows it;
 - a price whose last zero was too faint ("19.9") or whose point was missed ("4990") is completed.
 
+### Checking a photographed receipt
+
+Nobody wants to go over a receipt line by line, so photos are checked automatically (`js/check.js`), and the review screen only asks about what's in doubt.
+
+- **The total printed on the receipt wins.** It's what's saved, and it's shown first in the review, where it can be typed or corrected. The lines are checked against it.
+- **Quantity and weight lines are worked out:** 3 × 6.80 = 20.40 is saved as three units at 6.80, and weight × price per kilo must equal the line's amount, so a misread digit in any of the three is fixed by the arithmetic.
+- **Barcodes:** a barcode that isn't in the national list but is one digit away from exactly one that is (or from one of your products) is that one. With two candidates, the one whose name looks like the name that was read wins. Otherwise the check digit is worked out.
+- **Prices:** each price is read twice, from two differently cleaned images. A price both readings agree on, or that matches the shelf price of that barcode (`data/prices.json`, from the same price files) or what you paid before, counts as sure. A price one digit away from a known one is corrected.
+- **Making the lines add up:** when the lines don't add up to the total, the cheapest set of likely fixes (the other reading, a known price, a faint last digit) that makes them add up exactly is applied, if there's one clear answer. After you correct one line by hand, this runs again.
+- Only prices that are still in doubt are marked. If the digits in a photo are too small to read reliably, the review says so: a long receipt reads much better in two or three close photos.
+
 Before saving, every receipt can be reviewed: fix a name or price, remove a line, add a missing one, and compare the lines' sum with the receipt's total. On photos of dot-matrix receipts the Hebrew names often come out garbled. That's expected: the barcode and price are what matter, and each product is named once.
 
 ### Product names
@@ -49,7 +60,7 @@ Before saving, every receipt can be reviewed: fix a name or price, remove a line
 Names come from three places, in this order:
 
 1. **Products you already named:** a barcode you've seen before always gets your name.
-2. **The barcode list** (`data/barcodes.json`, about 33,000 products): built weekly by a GitHub Action (`.github/workflows/barcodes.yml`, `scripts/build_barcodes.py`) from the price files Israeli chains must publish by law. It currently reads Shufersal, Yohananof and Rami Levy. Barcodes are national, so the names work for receipts from any chain. `data/meta.json` shows when it last ran and from which branches. The Action can also be run by hand from the repository's **Actions** tab.
+2. **The barcode list** (`data/barcodes.json`, about 33,000 products, with shelf prices in `data/prices.json`): built weekly by a GitHub Action (`.github/workflows/barcodes.yml`, `scripts/build_barcodes.py`) from the price files Israeli chains must publish by law. It currently reads Shufersal, Yohananof and Rami Levy. Barcodes are national, so the names work for receipts from any chain. `data/meta.json` shows when it last ran and from which branches. The Action can also be run by hand from the repository's **Actions** tab.
 3. **OCR fixes** (photos only, `js/names.js`): products without a national barcode (produce, in-store codes) are matched word by word against a Hebrew product vocabulary, with low cost for letters OCR confuses on receipts (ה/ח, ם/ס, נ/ג, ר/ד…), unreadable characters treated as unknown letters, and split words rejoined.
 
 ### How prices and suggestions are calculated
@@ -123,6 +134,7 @@ node test/cloud.test.js    # sync between two "phones" on a simulated Firebase
 node test/shufersal.test.js  # Shufersal layout from made-up OCR words
 node test/paper.test.js      # photo cleaning, levelling, columns, barcodes, quantity lines, totals, several photos
 node test/names.test.js      # names: barcode list, your products, OCR fixes
+node test/check.test.js      # photos: barcodes, known prices, lines made to add up to the total
 ```
 
 `test/sample-yohananof.txt` is a made-up receipt in the Weezmo format. Its products, barcodes and prices are fictional.
@@ -138,6 +150,7 @@ node test/names.test.js      # names: barcode list, your products, OCR fixes
 | `js/ocr.js` | Reads picture receipts (Shufersal, screenshots) with Tesseract.js |
 | `js/shufersal.js` | Turns OCR results (Shufersal, photos) into receipt lines |
 | `js/names.js` | Product names: your products, the barcode list, OCR-aware word fixes |
+| `js/check.js` | Photos: barcodes and prices checked against what's known, lines made to add up to the printed total |
 | `scripts/build_barcodes.py` | Builds `data/barcodes.json` from the chains' public price files (run by the weekly Action) |
 | `js/paper.js` | Photos of paper receipts: cleaning, levelling, finding the columns and the total, merging several photos |
 | `js/categories.js` | Store sections and the keyword list used to guess them |

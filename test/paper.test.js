@@ -220,11 +220,11 @@ assert.strictEqual(r4.date, `${thisYear}-01-01`);
       ['7290000000015', 1, false, 12.9, 0],
       ['7290000000039', 4, false, 26, -4],
       ['7290000000046', 1, false, 7.5, 0],
-      ['964775', 1.205, true, 11.92, 0],
+      ['964775', 1.205, true, 11.93, 0], // 1.205 × 9.90: the faint last digit read as 2
       ['22', 0.65, true, 4.49, 0],
     ]
   );
-  assert.strictEqual(r.items[3].unitPrice, 9.89, 'price per kg from the amount and the weight');
+  assert.strictEqual(r.items[3].unitPrice, 9.9, 'price per kg completed from ".90" and the arithmetic');
   assert.strictEqual(r.items[1].unitPrice, 6.5);
   assert.strictEqual(r.total, 58.81, 'the total is the line the payments below add up to');
   assert.strictEqual(r.totalFound, true);
@@ -260,7 +260,20 @@ assert.strictEqual(S.pickCode('11217121210202'), '1210202', 'no barcode inside: 
 assert.strictEqual(S.fixBarcode('729000000003'), '7290000000039', 'lost check digit restored');
 assert.strictEqual(S.parseAmount('19.9'), 19.9);
 assert.strictEqual(S.parseAmount('13.907'), 13.9);
-assert.deepStrictEqual(S.midQuantity('6.50x4', 26), { qty: 4, unitPrice: 6.5, weighted: false, total: 26 });
+assert.deepStrictEqual(S.midQuantity('6.50x4', 26), { qty: 4, unitPrice: 6.5, weighted: false, total: 26, qtyChecked: true });
+// the unit price unreadable: 3 units, and 20.40 divides by 3
+assert.deepStrictEqual(S.midQuantity('4 80x3', 20.4), { qty: 3, unitPrice: 6.8, weighted: false, total: 20.4, qtyChecked: true });
+// weight × price per kilo: last digits fixed so the arithmetic works
+for (const [mid, paid, raw, want] of [
+  ['.90x221.205', 11.9, '11.9', [1.205, 9.9, 11.93]],
+  ['90x221.080', 5.2, '5.20', [1.08, 4.9, 5.29]],
+  ['6.90x120.659', 4.46, '4.46', [0.65, 6.9, 4.49]],
+  ['30x21.050', 7.25, '7.25', [1.05, 6.9, 7.25]],
+  ['5.00x420.253', 21.95, '21.95', [0.258, 85, 21.93]],
+]) {
+  const q = S.midQuantity(mid, paid, raw);
+  assert.deepStrictEqual([q.qty, q.unitPrice, q.total, q.weighted], want.concat(true), mid);
+}
 assert.strictEqual(S.midQuantity('85.00x220.258', 21.93).qty, 0.258);
 assert.strictEqual(S.midQuantity('5.20', 5.2), null, 'a price alone is not a quantity line');
 

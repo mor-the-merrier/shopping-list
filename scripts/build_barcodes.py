@@ -24,7 +24,7 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 LISTING = "https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0&page={page}"
@@ -128,7 +128,7 @@ def unpack(blob):
 
 
 def items_of(xml_bytes):
-    """(code, name, weighted) for every item, whatever the tag case."""
+    """(code, name, weighted, price) for every item, whatever the tag case."""
     root = ET.fromstring(xml_bytes)
     for el in root.iter():
         if el.tag.lower() not in ("item", "product"):
@@ -136,8 +136,12 @@ def items_of(xml_bytes):
         fields = {c.tag.lower(): (c.text or "").strip() for c in el}
         code = fields.get("itemcode", "")
         name = fields.get("itemname", "") or fields.get("manufactureritemdescription", "")
+        try:
+            price = round(float(fields.get("itemprice", "") or 0), 2)
+        except ValueError:
+            price = 0
         if code and name:
-            yield code, name, fields.get("bisweighted", "0") == "1"
+            yield code, name, fields.get("bisweighted", "0") == "1", price
 
 
 def clean_name(name):
@@ -145,9 +149,9 @@ def clean_name(name):
     return name
 
 
-def add_file(xml_bytes, names, words):
+def add_file(xml_bytes, names, words, prices):
     n = 0
-    for code, name, weighted in items_of(xml_bytes):
+    for code, name, weighted, price in items_of(xml_bytes):
         name = clean_name(name)
         for w in re.findall(r"[֐-׿][֐-׿\"'׳״]+", name):
             words[w.strip("\"'")] += 1
@@ -155,6 +159,9 @@ def add_file(xml_bytes, names, words):
         # National barcodes only. Codes starting with 2 are in-store scale labels.
         if len(code) >= 8 and code.isdigit() and not (weighted and code.startswith("2")):
             names.setdefault(code, name)
+            # shelf prices, to check prices read from a photo of a receipt
+            if not weighted and 0 < price < 5000:
+                prices[code][price] += 1
         n += 1
     return n
 
@@ -162,16 +169,17 @@ def add_file(xml_bytes, names, words):
 def main(out_dir):
     names = {}
     words = Counter()
+    prices = defaultdict(Counter)
     stores = []
     for store, url in price_file_links():
         try:
-            stores.append({"chain": "שופרסל", "store": store, "items": add_file(unpack(get(url)), names, words)})
+            stores.append({"chain": "שופרסל", "store": store, "items": add_file(unpack(get(url)), names, words, prices)})
         except Exception as e:
             errors.append(f"shufersal store {store}: {e}")
     for user, chain in CERBERUS:
         try:
             for fname, blob in cerberus_files(user):
-                stores.append({"chain": chain, "file": fname, "items": add_file(unpack(blob), names, words)})
+                stores.append({"chain": chain, "file": fname, "items": add_file(unpack(blob), names, words, prices)})
         except Exception as e:
             errors.append(f"{chain}: {type(e).__name__}: {e}")
 
@@ -193,6 +201,11 @@ def main(out_dir):
         meta["words"] = len(vocab)
         with open(os.path.join(out_dir, "words.json"), "w", encoding="utf-8") as f:
             json.dump(vocab, f, ensure_ascii=False, separators=(",", ":"))
+        # up to 4 prices per barcode, most common first (they differ by chain and branch)
+        price_list = {c: [p for p, _ in cnt.most_common(4)] for c, cnt in sorted(prices.items()) if c in names}
+        meta["prices"] = len(price_list)
+        with open(os.path.join(out_dir, "prices.json"), "w", encoding="utf-8") as f:
+            json.dump(price_list, f, ensure_ascii=False, separators=(",", ":"))
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(json.dumps(meta, ensure_ascii=False, indent=2))
