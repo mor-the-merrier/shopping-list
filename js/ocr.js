@@ -244,6 +244,33 @@
     return c;
   }
 
+  /** Everything below the items (total, VAT, payment), full width. */
+  function footer(canvas, fromY) {
+    const y0 = Math.max(0, Math.round(fromY || 0));
+    const h = Math.max(1, canvas.height - y0);
+    const c = canvasOf(canvas.width, h);
+    c.getContext('2d').drawImage(canvas, 0, y0, canvas.width, h, 0, 0, canvas.width, h);
+    return c;
+  }
+
+  /** The big total's box, squashed back to normal proportions, on a white margin. */
+  function bigTotalCanvas(canvas, box, factor = 1) {
+    const w = box.x1 - box.x0, h = box.y1 - box.y0;
+    const sh = Math.max(12, Math.round(h * box.squash * factor));
+    const c = canvasOf(w + 40, sh + 40);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, box.x0, box.y0, w, h, 20, 20, w, sh);
+    return c;
+  }
+
+  function grayOf(canvas) {
+    const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const g = new Uint8ClampedArray(canvas.width * canvas.height);
+    for (let p = 0, i = 0; p < g.length; p++, i += 4) g[p] = d[i];
+    return g;
+  }
+
   /** Strip words → full-image coordinates. */
   function unstrip(words, x0, scale = 1.5) {
     return words.map((w) => ({
@@ -264,7 +291,7 @@
     let stage = 0;
     const label = () => `קורא את הקבלה${n > 1 ? ` (צילום ${photo + 1} מתוך ${n})` : ''}`;
     const logger = (m) => {
-      if (m.status === 'recognizing text') onProgress((photo + (stage + m.progress) / 3) / n, label());
+      if (m.status === 'recognizing text') onProgress((photo + (stage + m.progress) / 4) / n, label());
       else if (/loading|initializ/i.test(m.status)) onProgress(0.02, 'טוען את זיהוי הטקסט');
     };
     const heb = await Tesseract.createWorker('heb', 1, { logger });
@@ -289,11 +316,37 @@
         await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.-' });
         const r3 = await digits.recognize(strip(img.text, 0, cols.amountTo));
 
+        // the total is often printed big and centered next to "לתשלום", outside the price column
+        stage = 3;
+        let footerWords = [];
+        if (cols.itemsEnd && cols.itemsEnd < img.height - 20) {
+          await digits.setParameters({ tessedit_pageseg_mode: '6', tessedit_char_whitelist: '0123456789.' });
+          const r4 = await digits.recognize(footer(img.text, cols.itemsEnd));
+          footerWords = wordsOf(r4.data, 0).map((w) => ({
+            text: w.text,
+            bbox: { x0: w.bbox.x0, y0: w.bbox.y0 + cols.itemsEnd, x1: w.bbox.x1, y1: w.bbox.y1 + cols.itemsEnd },
+          }));
+        }
+        // a double-height total next to "לתשלום": read on its own, squashed to normal size
+        let bigTotal = null;
+        const box = cols.itemsEnd ? root.PaperReceipt.bigTotalBox(grayOf(img.text), img.width, img.height, cols.itemsEnd) : null;
+        if (box) {
+          // read it twice at slightly different sizes; findTotal picks the reading to trust
+          await digits.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.' });
+          bigTotal = [];
+          for (const factor of [1, 0.8]) {
+            const r5 = await digits.recognize(bigTotalCanvas(img.text, box, factor));
+            if ((r5.data.text || '').trim()) bigTotal.push(r5.data.text.trim());
+          }
+        }
+
         out.push({
           text: r1.data.text || '',
           words,
           codeWords: unstrip(wordsOf(r2.data, 0), cols.codeFrom),
           amountWords: unstrip(wordsOf(r3.data, 0), 0),
+          footerWords,
+          bigTotal,
           width: img.width,
           codeFrom: cols.codeFrom,
           amountTo: cols.amountTo,
@@ -307,5 +360,5 @@
     }
   }
 
-  root.ReceiptOcr = { readPictureReceipt, readPaperPhotos, preparePhoto, strip, unstrip, loadTesseract };
+  root.ReceiptOcr = { readPictureReceipt, readPaperPhotos, preparePhoto, strip, unstrip, footer, bigTotalCanvas, grayOf, loadTesseract };
 })(window);

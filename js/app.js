@@ -732,6 +732,7 @@
     const parts = readings.map((r) => {
       const rows = S.buildRows(r);
       const parsed = S.parseRows(rows, r.text, { paper: true, chain: detected || { id: 'unknown', name: '' } });
+      P.applyTotal(parsed, r); // the total printed next to "לתשלום", often in big digits
       parsed.debug = rows.map((x) => [x.code, x.desc, x.amount].filter(Boolean).join(' | ')).join('\n');
       return parsed;
     });

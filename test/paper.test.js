@@ -129,4 +129,48 @@ const thisYear = new Date().getFullYear();
 const r4 = read(photo([['7290000000046', 'לחם', '7.50']]), 'תאריך קניה 01/01/2646');
 assert.strictEqual(r4.date, `${thisYear}-01-01`);
 
+// ---------- the total next to "לתשלום" ----------
+{
+  // A footer with a normal line, a separator rule, a double-height total and two normal lines
+  const W2 = 400, H2 = 300;
+  const g = new Uint8ClampedArray(W2 * H2).fill(255);
+  const fill = (x0, y0, x1, y1) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) g[y * W2 + x] = 0;
+  };
+  fill(250, 10, 380, 30); // "3 פריטים"
+  for (let x = 20; x < 380; x += 6) fill(x, 38, x + 4, 40); // dashed separator
+  fill(120, 50, 170, 92); // big "47.70"
+  fill(200, 50, 300, 92); // big "לתשלום"
+  fill(120, 110, 170, 130); // "40.42"
+  fill(200, 110, 280, 130);
+  fill(130, 150, 170, 170); // "7.28"
+  fill(200, 150, 290, 170);
+  const box = P.bigTotalBox(g, W2, H2, 0);
+  assert.ok(box, 'big line found');
+  assert.ok(box.y0 <= 50 && box.y1 >= 92 && box.y0 > 40, 'the tall line, without the separator: ' + JSON.stringify(box));
+  assert.ok(box.x0 < 120 && box.x1 > 170 && box.x1 < 200, 'just the amount, not the word: ' + JSON.stringify(box));
+  assert.ok(box.squash > 0.4 && box.squash < 0.6, 'squashed to normal height');
+}
+{
+  const footer = [
+    { text: '40.42', bbox: { x0: 100, y0: 200, x1: 180, y1: 230 } },
+    { text: '47.70', bbox: { x0: 100, y0: 300, x1: 180, y1: 330 } }, // the card payment line
+  ];
+  // two readings of the big total disagree: the one matching the sum wins
+  assert.deepStrictEqual(P.findTotal(footer, [], 47.7, ['47.10', '47.70']), { value: 47.7, how: 'big' });
+  // neither matches the sum (a line is missing): the one printed again below wins
+  assert.deepStrictEqual(P.findTotal(footer, [], 39.6, ['47.10', '47.70']), { value: 47.7, how: 'big' });
+  // no big total: the amount on the "לתשלום" line, then one equal to the sum, then the first
+  const words = [{ text: 'לתשלום', bbox: { x0: 300, y0: 195, x1: 420, y1: 235 } }];
+  assert.deepStrictEqual(P.findTotal(footer, words, 0, null), { value: 40.42, how: 'label' });
+  assert.deepStrictEqual(P.findTotal(footer, [], 47.7, null), { value: 47.7, how: 'sum' });
+  assert.deepStrictEqual(P.findTotal(footer, [], 1, null), { value: 40.42, how: 'first' });
+
+  const parsed = { items: [{ total: 8.9, discount: 0 }], itemsSum: 8.9, totalFound: false, total: 8.9, warnings: [] };
+  P.applyTotal(parsed, { footerWords: footer, words: [], bigTotal: ['47.70'] });
+  assert.strictEqual(parsed.total, 47.7);
+  assert.strictEqual(parsed.totalFound, true);
+  assert.ok(parsed.warnings.some((w) => /לא תואם/.test(w)), 'mismatch flagged');
+}
+
 console.log(`OK: paper receipts (cleaning, columns, ${merged.items.length} items over 2 photos, overlap dropped)`);

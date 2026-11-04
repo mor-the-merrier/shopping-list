@@ -170,7 +170,9 @@
       if (atMargin.length) codeLeft.push(Math.min(...atMargin.map((w) => w.bbox.x0)));
     }
     if (amountRight.length && !codeLeft.length) codeLeft.push(width * 0.7);
-    if (!amountRight.length) return { amountTo: Math.round(width * 0.28), codeFrom: Math.round(width * 0.7), found: false };
+    // where the items end: the total, VAT and payment lines come after this
+    const itemsEnd = items.length ? Math.max(...items.map((ws) => Math.max(...ws.map((w) => w.bbox.y1)))) : 0;
+    if (!amountRight.length) return { amountTo: Math.round(width * 0.28), codeFrom: Math.round(width * 0.7), found: false, itemsEnd };
     const pad = width * 0.02;
     return {
       amountTo: Math.round(Math.max(...amountRight) + pad),
@@ -178,7 +180,136 @@
       codeFrom: Math.round(Math.max(width * 0.5, Math.min(Math.min(...codeLeft) - pad, width * 0.62))),
       found: true,
       itemLines: amountRight.length,
+      itemsEnd,
     };
+  }
+
+  // ---------- the big "to pay" line ----------
+
+  /**
+   * Text lines (y ranges) in a black/white picture from row fromY down.
+   * Separator rules (ink spread across most of the width) count as gaps.
+   */
+  function lineBands(gray, width, height, fromY = 0) {
+    const edge = Math.round(width * 0.015);
+    const inkRow = new Uint8Array(height);
+    for (let y = Math.max(0, fromY); y < height; y++) {
+      let count = 0, first = -1, last = -1;
+      for (let x = edge; x < width - edge; x++) {
+        if (gray[y * width + x] < 128) {
+          count++;
+          if (first < 0) first = x;
+          last = x;
+        }
+      }
+      const rule = last - first > width * 0.6 && count > width * 0.08;
+      inkRow[y] = count > width * 0.004 && !rule ? 1 : 0;
+    }
+    const bands = [];
+    let start = -1;
+    for (let y = Math.max(0, fromY); y <= height; y++) {
+      const on = y < height && inkRow[y];
+      if (on && start < 0) start = y;
+      if (!on && start >= 0) {
+        if (y - start > 8) bands.push({ y0: start, y1: y });
+        start = -1;
+      }
+    }
+    return bands;
+  }
+
+  /**
+   * Many receipts print the total in double-height digits next to "לתשלום".
+   * OCR expects uniform text, so find that tall line below the items and the
+   * amount at its left; ocr.js squashes it to normal proportions and reads it.
+   * Returns { x0, y0, x1, y1, squash } or null.
+   */
+  function bigTotalBox(gray, width, height, fromY) {
+    const bands = lineBands(gray, width, height, fromY);
+    if (bands.length < 2) return null;
+    const hs = bands.map((b) => b.y1 - b.y0).sort((a, b) => a - b);
+    const med = hs[Math.floor(hs.length / 2)];
+    const tall = bands.slice(0, 4).find((b) => b.y1 - b.y0 >= med * 1.4);
+    if (!tall) return null;
+
+    // words on that line: runs of ink columns separated by more than ~half a letter height
+    const edge = Math.round(width * 0.015);
+    const runs = [];
+    let s = -1, e = -1, gap = 0;
+    for (let x = edge; x < width - edge + med; x++) {
+      let ink = false;
+      if (x < width - edge) {
+        for (let y = tall.y0; y < tall.y1 && !ink; y++) if (gray[y * width + x] < 128) ink = true;
+      }
+      if (ink) {
+        if (s < 0) s = x;
+        e = x;
+        gap = 0;
+      } else if (s >= 0 && ++gap > med * 0.6) {
+        if (e - s > med * 0.3) runs.push({ x0: s, x1: e });
+        s = -1;
+      }
+    }
+    if (!runs.length) return null;
+    const amount = runs[0]; // right-to-left receipt: the amount is left of "לתשלום"
+    const pad = Math.round(med * 0.2);
+    return {
+      x0: Math.max(0, amount.x0 - pad),
+      x1: Math.min(width, amount.x1 + pad),
+      y0: Math.max(0, tall.y0 - 2),
+      y1: Math.min(height, tall.y1 + 2),
+      squash: med / (tall.y1 - tall.y0),
+    };
+  }
+
+  // ---------- the total ----------
+
+  const PRICE = /(\d{1,5})[.,](\d{2})(?!\d)/;
+  const TO_PAY = /לתשל|תשלו|שלום|לתש|סה["״]?כ/;
+
+  /**
+   * The receipt's total, from a digits-only reading of the area below the items
+   * (footerWords) and the Hebrew reading (words, to spot "לתשלום").
+   * Order: the amount on the "to pay" line; an amount equal to the lines' sum;
+   * the first amount below the items (on Israeli receipts that's "to pay").
+   */
+  function findTotal(footerWords, words, itemsSum, bigTotal) {
+    // The double-height "to pay" amount, read on its own (once or more): trust a
+    // reading that equals the lines' sum, then one the readings agree on, then the first.
+    const big = (Array.isArray(bigTotal) ? bigTotal : bigTotal != null ? [bigTotal] : [])
+      .map((t) => String(t).match(PRICE))
+      .filter(Boolean)
+      .map((m) => parseFloat(`${m[1]}.${m[2]}`));
+    if (big.length) {
+      const sum = big.find((v) => Math.abs(v - itemsSum) < 0.01);
+      if (sum != null) return { value: sum, how: 'big' };
+      const agreed = big.find((v, i) => big.indexOf(v) !== i);
+      if (agreed != null) return { value: agreed, how: 'big' };
+      const alsoBelow = big.find((v) => footerWords.some((w) => (String(w.text).match(PRICE) || [])[0] === v.toFixed(2)));
+      if (alsoBelow != null) return { value: alsoBelow, how: 'big' }; // printed again as the payment
+      return { value: big[0], how: 'big' };
+    }
+    const heights = footerWords.map((w) => w.bbox.y1 - w.bbox.y0).sort((a, b) => a - b);
+    const lineH = heights.length ? heights[Math.floor(heights.length / 2)] : 40;
+    const amounts = [];
+    for (const w of footerWords) {
+      const m = String(w.text).match(PRICE);
+      if (!m) continue;
+      amounts.push({ value: parseFloat(`${m[1]}.${m[2]}`), y: (w.bbox.y0 + w.bbox.y1) / 2, h: w.bbox.y1 - w.bbox.y0 });
+    }
+    if (!amounts.length) return null;
+    amounts.sort((a, b) => a.y - b.y);
+
+    const label = words.find((w) => TO_PAY.test(w.text) && amounts.some((a) => Math.abs((w.bbox.y0 + w.bbox.y1) / 2 - a.y) < Math.max(lineH, a.h) * 0.7));
+    if (label) {
+      const ly = (label.bbox.y0 + label.bbox.y1) / 2;
+      const onLine = amounts.filter((a) => Math.abs(a.y - ly) < Math.max(lineH, a.h) * 0.7);
+      if (onLine.length) return { value: onLine[0].value, how: 'label' };
+    }
+    const equal = amounts.find((a) => Math.abs(a.value - itemsSum) < 0.01);
+    if (equal) return { value: equal.value, how: 'sum' };
+    const first = amounts.find((a) => a.value > 0);
+    return first ? { value: first.value, how: 'first' } : null;
   }
 
   // ---------- store name ----------
@@ -208,6 +339,21 @@
   function storeFromName(name) {
     const hit = KNOWN.find((k) => k.match.test(name) || k.name === name.trim());
     return hit ? { id: hit.id, name: hit.name } : { id: storeId(name), name: String(name).trim() };
+  }
+
+  /** Put the total found below the items on a parsed photo, and flag a mismatch. */
+  function applyTotal(parsed, reading) {
+    if (parsed.totalFound || !parsed.items.length) return parsed;
+    const t = findTotal(reading.footerWords || [], reading.words || [], parsed.itemsSum, reading.bigTotal);
+    if (!t) return parsed;
+    parsed.total = t.value;
+    parsed.totalFound = true;
+    parsed.totalHow = t.how;
+    parsed.warnings = parsed.warnings.filter((w) => !/סה״כ|לא תואם/.test(w));
+    if (Math.abs(parsed.itemsSum - t.value) > 0.1) {
+      parsed.warnings.push(`סכום המוצרים (₪${parsed.itemsSum}) לא תואם לסה״כ בקבלה (₪${t.value}). אפשר לתקן את השורות למטה.`);
+    }
+    return parsed;
   }
 
   // ---------- 3. several photos ----------
@@ -268,7 +414,7 @@
     });
   }
 
-  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, findColumns, detectStore, storeFromName, mergePhotos, KNOWN };
+  const api = { CLEAN, findPaper, maxChannel, evenLight, threshold, thicken, cleanForOcr, findColumns, findTotal, applyTotal, lineBands, bigTotalBox, detectStore, storeFromName, mergePhotos, KNOWN };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaperReceipt = api;
 })(typeof window !== 'undefined' ? window : globalThis);
